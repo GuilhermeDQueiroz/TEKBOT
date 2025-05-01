@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TekBot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="body">
+
+  <div class="chat-container">
+    <header class="chat-header">
+      TekBot
+    </header>
+
+    <main id="chat" class="chat-main">
+      <!-- Mensagens vão aqui -->
+    </main>
+
+    <form id="chat-form" class="chat-form">
+      <input
+        id="user-input"
+        type="text"
+        placeholder="Digite sua mensagem..."
+        class="chat-input"
+        autocomplete="off"
+        required
+      />
+      <button type="submit" class="chat-button">Enviar</button>
+    </form>
+  </div>
+
+  <script src="chat.js"></script>
+</body>
+</html>
