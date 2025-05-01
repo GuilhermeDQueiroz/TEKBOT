@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TekBot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="login-container" id="login-container">
+    <h2 class="login-header">Cadastro</h2>
+    <form class="login-form" id="cadastro-form">
+      <div class="input-group">
+        <label for="email">E-mail:</label>
+        <input type="email" id="email" name="email" required placeholder="Digite seu e-mail">
+      </div>
+      <div class="input-group">
+        <label for="password">Senha:</label>
+        <input type="password" id="password" name="password" required placeholder="Digite sua senha">
+      </div>
+      <div class="input-group">
+        <label for="confirm-password">Confirmar Senha:</label>
+        <input type="password" id="confirm-password" name="confirm-password" required placeholder="Confirme sua senha">
+      </div>
+      <button type="submit" class="login-btn">Cadastrar</button>
+    </form>
+
+    <div class="login-links">
+      <a href="login.html" class="link">Já tem uma conta? Faça login</a>
+    </div>
+  </div>
+  <script src="cadastro.js"></script>
+</body>
+</html>
