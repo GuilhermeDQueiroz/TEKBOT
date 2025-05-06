@@ -1,103 +1,145 @@
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+import os
 import torch
 import numpy as np
-from database import colecao_mensagens  # Sua coleção MongoDB
-import time
+from datetime import datetime, timezone
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from database import colecao_mensagens
 
-# Inicializar o modelo de embeddings
+# === Configuração de ambiente ===
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# === Carregar modelo de embeddings ===
 print("[INFO] Carregando modelo de embeddings...")
-modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
+modelo_embedding = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 print("[OK] Modelo de embeddings carregado.")
 
-# Função para escolher o melhor tipo de tensor suportado pela GPU
-def detectar_tipo_tensor():
-    if not torch.cuda.is_available():
-        print("[INFO] CUDA não disponível. Usando CPU com float32.")
-        return torch.float32
-    try:
-        torch.tensor([1.0], dtype=torch.bfloat16, device="cuda")
-        print("[INFO] Usando torch.bfloat16 com CUDA.")
-        return torch.bfloat16
-    except:
-        try:
-            torch.tensor([1.0], dtype=torch.float16, device="cuda")
-            print("[INFO] bfloat16 não suportado. Usando torch.float16.")
-            return torch.float16
-        except:
-            print("[INFO] Nenhuma aceleração suportada. Usando torch.float32.")
-            return torch.float32
-
-# Detectar tipo de tensor compatível
-tipo_tensor = detectar_tipo_tensor()
-dispositivo = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Inicializar o modelo de geração de texto LLaMA 3
-print("[INFO] Carregando modelo de geração de texto LLaMA 3...")
-model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
+# === Carregar modelo de linguagem T5 ===
+print("[INFO] Carregando modelo T5 (FLAN-T5-base)...")
+model_id = "google/flan-t5-base"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    torch_dtype=tipo_tensor,
-    device_map="auto" if dispositivo == "cuda" else "cpu"
-)
-print("[OK] Modelo de geração carregado.")
+model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
-def gerar_resposta_com_ia(contexto_relevante, pergunta):
-    """
-    Gera uma resposta com base nos documentos relevantes e na pergunta.
-    """
-    print("[INFO] Gerando resposta com base no contexto e pergunta.")
-    contexto = "\n".join(doc["texto"] for doc in contexto_relevante)
-    prompt = f"Com base nas informações abaixo, responda à pergunta de forma concisa e clara:\n\n{contexto}\n\nPergunta: {pergunta}\nResposta:"
+tokenizer.pad_token = tokenizer.eos_token
+model.resize_token_embeddings(len(tokenizer))
+model.to(device)
+print("[OK] Modelo T5 carregado.")
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(device=model.device)
-    inicio = time.time()
-    outputs = model.generate(**inputs, max_new_tokens=256, temperature=0.7, top_p=0.9)
-    fim = time.time()
+# === Funções ===
 
-    print(f"[OK] Resposta gerada em {fim - inicio:.2f}s")
-    resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return resposta_gerada
+def gerar_resposta_com_ia(contexto_relevante, pergunta: str) -> str:
+    contexto = "\n".join(f"- {doc.get('mensagens', '')}" for doc in contexto_relevante) \
+               if contexto_relevante else "Nenhuma informação adicional foi encontrada no banco de dados."
+
+    prompt = f"""
+Você é um assistente especializado em rotinas fiscais e correção de erros na emissão de NFe, especialmente erros da SEFAZ. 
+Com base nas mensagens e documentos abaixo, forneça uma solução detalhada e precisa para o erro de rejeição que o usuário está enfrentando.
+
+Contexto relevante:
+{contexto}
+
+Pergunta: {pergunta}
+
+Resposta detalhada e precisa:
+""".strip()
+
+    inputs = tokenizer(prompt, return_tensors="pt", padding="longest", truncation=True, max_length=1024).to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_length=256,
+            num_return_sequences=1,
+            do_sample=False,  # deterministic
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+
+    resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+    # Validação mínima da resposta
+    if "rejeição" in resposta_gerada.lower():
+        return resposta_gerada
+
+    return "Não conseguimos identificar a rejeição. Verifique os seguintes pontos: CNPJ correto, chave de acesso única e dados do destinatário corretamente preenchidos."
 
 def recuperar_informacoes_relevantes(pergunta: str):
-    """
-    Busca os documentos mais relevantes com base na similaridade de embeddings.
-    Usa cache de embeddings no MongoDB.
-    """
-    print(f"[INFO] Gerando embedding da pergunta: '{pergunta}'")
-    inicio = time.time()
-    pergunta_embedding = modelo_embedding.encode([pergunta])
-    fim = time.time()
-    print(f"[INFO] Embedding da pergunta gerado em {fim - inicio:.2f}s")
+    try:
+        documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
+    except Exception as e:
+        print(f"[ERRO] Não foi possível acessar o banco de dados: {e}")
+        return []
 
-    documentos = list(colecao_mensagens.find({}))
-    print(f"[INFO] {len(documentos)} documentos carregados do banco.")
+    if not documentos:
+        print("[INFO] Nenhum documento com mensagens encontrado.")
+        return []
 
+    pergunta_embedding = modelo_embedding.encode([pergunta])[0].reshape(1, -1)
     documentos_com_similaridade = []
 
     for doc in documentos:
+        texto_doc = doc.get("mensagens", "")
+        if not texto_doc:
+            continue
+
         if "embedding" in doc:
             doc_embedding = np.array(doc["embedding"]).reshape(1, -1)
-            print(f"[DEBUG] Usando embedding em cache para documento: {doc['_id']}")
         else:
-            print(f"[DEBUG] Gerando novo embedding para documento: {doc['_id']}")
-            doc_embedding_np = modelo_embedding.encode([doc["texto"]])[0]
+            doc_embedding_np = modelo_embedding.encode([texto_doc])[0]
             doc_embedding = doc_embedding_np.reshape(1, -1)
-            colecao_mensagens.update_one(
-                {"_id": doc["_id"]},
-                {"$set": {"embedding": doc_embedding_np.tolist()}}
-            )
+            try:
+                colecao_mensagens.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"embedding": doc_embedding_np.tolist()}}
+                )
+            except Exception as e:
+                print(f"[WARN] Falha ao atualizar embedding: {e}")
 
         similaridade = cosine_similarity(pergunta_embedding, doc_embedding)
         documentos_com_similaridade.append((doc, similaridade[0][0]))
 
     documentos_com_similaridade.sort(key=lambda x: x[1], reverse=True)
-    print("[INFO] Documentos ordenados por similaridade.")
-    
-    documentos_relevantes = [doc for doc, _ in documentos_com_similaridade[:3]]
-    for idx, doc in enumerate(documentos_relevantes):
-        print(f"[TOP {idx+1}] Documento: {doc.get('texto')[:80]}...")  # Mostra início do texto
+    documentos_relevantes = [doc for doc, _ in documentos_com_similaridade[:5]]
 
     return documentos_relevantes
+
+def registrar_interacao(pergunta: str, resposta: str, contexto: list):
+    interacao = {
+        "tipo": "interacao",
+        "pergunta": pergunta,
+        "resposta": resposta,
+        "contexto_utilizado": contexto,
+        "data": datetime.now(timezone.utc)
+    }
+
+    try:
+        colecao_mensagens.insert_one(interacao)
+        print("[INFO] Interação registrada com sucesso.")
+    except Exception as e:
+        print(f"[ERRO] Falha ao registrar a interação: {e}")
+
+# === Execução interativa via terminal ===
+if __name__ == "__main__":
+    print("\n[ASSISTENTE ERP - Tek-System Informática]")
+    print("Pergunte sobre rotinas fiscais, erros de NFe, MDF-e, SPED, etc.")
+    print("Digite 'sair' para encerrar.\n")
+
+    while True:
+        try:
+            pergunta = input("Pergunta: ").strip()
+            if not pergunta:
+                continue
+            if pergunta.lower() == 'sair':
+                print("Encerrando assistente.")
+                break
+
+            documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
+            resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
+            registrar_interacao(pergunta, resposta, documentos_relevantes)
+
+        except KeyboardInterrupt:
+            print("\nEncerrando assistente por interrupção manual.")
+            break
+        except Exception as e:
+            print(f"[ERRO] Ocorreu um erro durante a execução: {e}")
