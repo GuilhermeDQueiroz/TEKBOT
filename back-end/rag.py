@@ -12,12 +12,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # === Carregar modelo de embeddings ===
 print("[INFO] Carregando modelo de embeddings...")
-modelo_embedding = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
+modelo_embedding = SentenceTransformer('meta-llama/Meta-Llama-3-8B')
 print("[OK] Modelo de embeddings carregado.")
 
 # === Carregar modelo de linguagem T5 ===
 print("[INFO] Carregando modelo T5 (FLAN-T5-base)...")
-model_id = "google/flan-t5-base"
+model_id = "meta-llama/Meta-Llama-3-8B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
@@ -33,37 +33,30 @@ def gerar_resposta_com_ia(contexto_relevante, pergunta: str) -> str:
                if contexto_relevante else "Nenhuma informação adicional foi encontrada no banco de dados."
 
     prompt = f"""
-Você é um assistente especializado em rotinas fiscais e correção de erros na emissão de NFe, especialmente erros da SEFAZ. 
-Com base nas mensagens e documentos abaixo, forneça uma solução detalhada e precisa para o erro de rejeição que o usuário está enfrentando.
+Você é um especialista em rotinas fiscais e erros da SEFAZ. Com base nas mensagens abaixo, ajude com uma explicação:
 
 Contexto relevante:
 {contexto}
 
 Pergunta: {pergunta}
 
-Resposta detalhada e precisa:
+Resposta:
 """.strip()
 
-    inputs = tokenizer(prompt, return_tensors="pt", padding="longest", truncation=True, max_length=1024).to(device)
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
     with torch.no_grad():
         outputs = model.generate(
-            **inputs,
-            max_length=256,
-            num_return_sequences=1,
-            do_sample=False,  # deterministic
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_new_tokens=300,
+            temperature=0.7,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id
         )
 
-    resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-
-    # Validação mínima da resposta
-    if "rejeição" in resposta_gerada.lower():
-        return resposta_gerada
-
-    return "Não conseguimos identificar a rejeição. Verifique os seguintes pontos: CNPJ correto, chave de acesso única e dados do destinatário corretamente preenchidos."
-
+    resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return resposta_gerada.replace(prompt, "").strip()
 def recuperar_informacoes_relevantes(pergunta: str):
     try:
         documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
