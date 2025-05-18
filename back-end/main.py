@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
 from typing import List
 from schemas import PerguntaEntrada, MensagemEntrada
 from models import UsuarioLogin, Token
@@ -22,6 +23,7 @@ colecao_mensagens = db["mensagens"]
 # Inicializa FastAPI
 app = FastAPI()
 
+
 @app.post("/login", response_model=Token)
 def login(usuario: UsuarioLogin):
     db_user = colecao_usuarios.find_one({"email": usuario.email})
@@ -34,6 +36,7 @@ def login(usuario: UsuarioLogin):
 
     access_token = create_access_token(dados={"sub": usuario.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 @app.post("/register", response_model=UsuarioLogin)
 def register_user(usuario: UsuarioLogin):
@@ -48,6 +51,7 @@ def register_user(usuario: UsuarioLogin):
 
     return usuario
 
+
 @app.post("/pergunta")
 def responder_pergunta(pergunta_entrada: PerguntaEntrada):
     try:
@@ -59,11 +63,11 @@ def responder_pergunta(pergunta_entrada: PerguntaEntrada):
         registrar_interacao(pergunta, resposta, [doc.get("texto", "") for doc in contexto])
 
         return {"resposta": resposta}
-    
+
     except Exception as e:
         print(f"[ERROR] Erro ao processar a pergunta: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno no servidor")
-    
+
 
 @app.post("/mensagens")
 def adicionar_mensagem(mensagem: MensagemEntrada):
@@ -86,3 +90,21 @@ def adicionar_mensagem(mensagem: MensagemEntrada):
     except Exception as e:
         print(f"[ERROR] Erro ao adicionar mensagem: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao salvar a mensagem")
+
+
+# ✅ NOVA ROTA PARA O FRONT-END ACESSAR A RESPOSTA DA IA
+@app.post("/ia/responder")
+def responder_ia(pergunta_entrada: PerguntaEntrada):
+    try:
+        pergunta = pergunta_entrada.pergunta
+
+        contexto = recuperar_informacoes_relevantes(pergunta)
+        resposta = gerar_resposta_com_ia(contexto, pergunta)
+
+        registrar_interacao(pergunta, resposta, [doc.get("texto", "") for doc in contexto])
+
+        return JSONResponse(content={"resposta": resposta}, status_code=200)
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao responder com IA: {e}")
+        return JSONResponse(content={"erro": "Erro ao processar a pergunta"}, status_code=500)
