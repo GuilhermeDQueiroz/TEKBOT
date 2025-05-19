@@ -2,7 +2,7 @@ const chat = document.getElementById("chat");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("user-input");
 
-form.addEventListener("submit", (e) => {
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const msg = input.value.trim();
   if (!msg) return;
@@ -10,9 +10,23 @@ form.addEventListener("submit", (e) => {
   appendMessage(msg, "right");
   input.value = "";
 
-  setTimeout(() => {
-    appendMessage("Essa é uma resposta automática!", "left");
-  }, 1000);
+  // Mensagem de carregamento (opcional)
+  const loading = appendMessage("Digitando...", "left");
+
+  try {
+    const response = await axios.post("http://localhost:8000/ia/responder", {
+      pergunta: msg
+    });
+
+    // Remove a mensagem de carregamento
+    chat.removeChild(loading);
+
+    appendMessage(response.data.resposta, "left");
+  } catch (error) {
+    console.error("Erro ao chamar a IA:", error);
+    chat.removeChild(loading);
+    appendMessage("Erro ao processar a pergunta. Tente novamente.", "left");
+  }
 });
 
 function appendMessage(message, side) {
@@ -26,4 +40,6 @@ function appendMessage(message, side) {
   wrapper.appendChild(bubble);
   chat.appendChild(wrapper);
   chat.scrollTop = chat.scrollHeight;
+
+  return wrapper; // útil para remover mensagens (ex: carregamento)
 }
