@@ -12,12 +12,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # === Carregar modelo de embeddings ===
 print("[INFO] Carregando modelo de embeddings...")
-modelo_embedding = SentenceTransformer('meta-llama/Meta-Llama-3-8B')
+modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')  # modelo leve e eficaz
 print("[OK] Modelo de embeddings carregado.")
 
 # === Carregar modelo de linguagem T5 ===
 print("[INFO] Carregando modelo T5 (FLAN-T5-base)...")
-model_id = "meta-llama/Meta-Llama-3-8B"
+model_id = "google/flan-t5-base"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
@@ -43,7 +43,7 @@ Pergunta: {pergunta}
 Resposta:
 """.strip()
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, padding=True).to(device)
 
     with torch.no_grad():
         outputs = model.generate(
@@ -56,7 +56,8 @@ Resposta:
         )
 
     resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return resposta_gerada.replace(prompt, "").strip()
+    return resposta_gerada.strip()
+
 def recuperar_informacoes_relevantes(pergunta: str):
     try:
         documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
@@ -130,6 +131,7 @@ if __name__ == "__main__":
             documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
             resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
             registrar_interacao(pergunta, resposta, documentos_relevantes)
+            print(f"\n[RESPOSTA]: {resposta}\n")
 
         except KeyboardInterrupt:
             print("\nEncerrando assistente por interrupção manual.")
