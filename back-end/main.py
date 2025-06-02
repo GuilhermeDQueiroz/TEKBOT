@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from typing import List
@@ -26,6 +27,15 @@ colecao_mensagens = db["mensagens"]
 
 # Inicializa FastAPI
 app = FastAPI()
+# Configurar o CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:8001", "http://localhost:8001"],  # origens permitidas
+    allow_credentials=True,
+    allow_methods=["*"],   # ou ["POST"]
+    allow_headers=["*"],   # ou ["Content-Type"]
+)
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 

@@ -1,15 +1,18 @@
 <!DOCTYPE html>
 <html lang="pt-br">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TekBot</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 </head>
+
 <body>
   <div class="login-container">
     <h2 class="login-header">Login</h2>
-    <form class="login-form">
+    <form id="login-form" class="login-form">
       <div class="input-group">
         <label for="email">E-mail:</label>
         <input type="email" id="email" name="email" required placeholder="Digite seu e-mail">
@@ -18,7 +21,7 @@
         <label for="password">Senha:</label>
         <input type="password" id="password" name="password" required placeholder="Digite sua senha">
       </div>
-      <button type="button" class="login-btn" onclick="window.location.href='chat.html';">Login</button>
+      <button type="submit" class="login-btn">Login</button>
     </form>
 
     <!-- Links para cadastro e recuperação de senha -->
@@ -27,5 +30,7 @@
       <a href="recuperarsenha.html" class="link">Esqueceu sua senha?</a>
     </div>
   </div>
+  <script src="login.js"></script>
 </body>
+
 </html>
