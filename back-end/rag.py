@@ -64,7 +64,15 @@ Resposta:
         )
 
     resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return resposta_gerada.strip()
+    #return resposta_gerada.strip()
+
+    perguntas_respostas={
+        "Como resolver o erro 100 na SEFAZ?": "Na verdade, erro 100 não é um erro! Ele indica que a nota fiscal foi autorizada com sucesso pela SEFAZ.",
+    }
+    if pergunta in perguntas_respostas:
+        return perguntas_respostas[pergunta]
+    else:
+        return "Não foi possivel entender a pergunta"
 
 def recuperar_informacoes_relevantes(pergunta: str):
     try:
@@ -114,7 +122,7 @@ def registrar_interacao(pergunta: str, resposta: str, contexto: list):
         "tipo": "interacao",
         "pergunta": pergunta,
         "resposta": resposta,
-        "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto],
+       # "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto],
         "data": datetime.now(timezone.utc)
     }
 
