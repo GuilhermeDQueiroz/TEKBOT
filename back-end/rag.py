@@ -1,10 +1,10 @@
 import os
 import torch
 import numpy as np
+import requests
 from datetime import datetime, timezone
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from database import colecao_mensagens
 
 # === Configuração de ambiente ===
@@ -15,75 +15,62 @@ print("[INFO] Carregando modelo de embeddings...")
 modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 print("[OK] Modelo de embeddings carregado.")
 
-# === Carregar modelo de linguagem T5 ===
-print("[INFO] Carregando modelo T5 (FLAN-T5-base)...")
-model_id = "google/flan-t5-base"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+# === Info sobre LLaMA via Ollama ===
+print("[INFO] Utilizando LLaMA 3 via Ollama (localhost:11434)...")
 
-tokenizer.pad_token = tokenizer.eos_token
-model.resize_token_embeddings(len(tokenizer))
-model.to(device)
-print("[OK] Modelo T5 carregado.")
+# Histórico de conversas
+historico_conversas = []
 
 # === Funções ===
 
-def gerar_resposta_com_ia(contexto_relevante, pergunta: str) -> str:
+def gerar_resposta_com_ia(contexto_relevante, pergunta):
     if not contexto_relevante:
         return "Desculpe, não encontrei informações suficientes para responder à sua pergunta no momento."
 
-    # Monta contexto com exemplos de pergunta + resposta
-    contexto = "\n\n".join(
+    # Monta o contexto baseado nos documentos encontrados
+    contexto = "\n".join(
         f"Pergunta: {doc.get('pergunta', '')}\nResposta: {doc.get('resposta', '')}"
         for doc in contexto_relevante
     )
 
+    # Prompt estruturado
     prompt = f"""
-Você é um especialista em rotinas fiscais, documentos fiscais eletrônicos e erros da SEFAZ. 
-Com base nos exemplos abaixo, responda a pergunta de forma clara e detalhada.
+Você é um atendente especialista em sistema ERP.
+Com base no histórico abaixo, responda a próxima pergunta do usuário com clareza e objetividade.
 
-Exemplos:
+Histórico de perguntas e respostas:
 {contexto}
 
-Agora, responda à seguinte pergunta com base nos exemplos e seu conhecimento:
-{pergunta}
-
+Nova pergunta do usuário: {pergunta}
 Resposta:
-""".strip()
+"""
 
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, padding=True).to(device)
+    # Requisição para o Ollama (LLaMA 3 rodando localmente)
+    response = requests.post(
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "llama3",
+            "prompt": prompt,
+            "stream": False,
+            "temperature": 0.7,
+            "num_predict": 512
+        }
+    )
 
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            max_new_tokens=300,
-            temperature=0.7,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id
-        )
-
-    resposta_gerada = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    #return resposta_gerada.strip()
-
-    perguntas_respostas={
-        "Como resolver o erro 100 na SEFAZ?": "Na verdade, erro 100 não é um erro! Ele indica que a nota fiscal foi autorizada com sucesso pela SEFAZ.",
-    }
-    if pergunta in perguntas_respostas:
-        return perguntas_respostas[pergunta]
+    if response.ok:
+        return response.json()['response'].strip()
     else:
-        return "Não foi possivel entender a pergunta"
+        return "Erro ao gerar resposta com LLaMA."
+
 
 def recuperar_informacoes_relevantes(pergunta: str):
     try:
-        # Busca documentos que não são interações (ou seja, base de conhecimento)
         documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
     except Exception as e:
-        print(f"[ERRO] Não foi possível acessar o banco de dados: {e}")
+        print(f"[ERRO] Acesso ao banco falhou: {e}")
         return []
 
     if not documentos:
-        print("[INFO] Nenhum documento de conhecimento encontrado.")
         return []
 
     pergunta_embedding = modelo_embedding.encode([pergunta])[0].reshape(1, -1)
@@ -94,11 +81,9 @@ def recuperar_informacoes_relevantes(pergunta: str):
         if not pergunta_doc:
             continue
 
-        # Verifica se já tem embedding salvo no documento
         if "embedding" in doc:
             doc_embedding = np.array(doc["embedding"]).reshape(1, -1)
         else:
-            # Calcula embedding e salva no documento para próxima vez
             doc_embedding_np = modelo_embedding.encode([pergunta_doc])[0]
             doc_embedding = doc_embedding_np.reshape(1, -1)
             try:
@@ -107,68 +92,86 @@ def recuperar_informacoes_relevantes(pergunta: str):
                     {"$set": {"embedding": doc_embedding_np.tolist()}}
                 )
             except Exception as e:
-                print(f"[WARN] Falha ao atualizar embedding: {e}")
+                print(f"[WARN] Não foi possível salvar embedding: {e}")
 
         similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
         documentos_com_similaridade.append((doc, similaridade))
 
     documentos_com_similaridade.sort(key=lambda x: x[1], reverse=True)
-    documentos_relevantes = [doc for doc, sim in documentos_com_similaridade[:5]]
+    return [doc for doc, sim in documentos_com_similaridade[:5] if sim > 0.6]
 
-    return documentos_relevantes
 
 def registrar_interacao(pergunta: str, resposta: str, contexto: list):
     interacao = {
         "tipo": "interacao",
         "pergunta": pergunta,
         "resposta": resposta,
-       # "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto],
+        "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto],
         "data": datetime.now(timezone.utc)
     }
 
     try:
         colecao_mensagens.insert_one(interacao)
-        print("[INFO] Interação registrada com sucesso.")
+        print("[INFO] Interação salva no banco de dados.")
     except Exception as e:
-        print(f"[ERRO] Falha ao registrar a interação: {e}")
+        print(f"[ERRO] Falha ao salvar interação: {e}")
 
-# === Execução interativa via terminal ===
+
+def treinar_nova_pergunta(pergunta: str, resposta: str):
+    """Simula aprendizado incremental armazenando a pergunta e resposta como novo dado de conhecimento."""
+    try:
+        embedding = modelo_embedding.encode([pergunta])[0].tolist()
+        novo_conhecimento = {
+            "tipo": "base_conhecimento",
+            "pergunta": pergunta,
+            "resposta": resposta,
+            "embedding": embedding,
+            "data": datetime.now(timezone.utc)
+        }
+        colecao_mensagens.insert_one(novo_conhecimento)
+        print("[INFO] Nova pergunta/resposta registrada na base de conhecimento.")
+    except Exception as e:
+        print(f"[ERRO] Falha ao treinar nova pergunta: {e}")
+
+# === Execução via terminal ===
 if __name__ == "__main__":
-    print("\n[ASSISTENTE ERP - Tek-System Informática]")
-    print("Pergunte sobre rotinas fiscais, erros de NFe, MDF-e, SPED, etc.")
-    print("Digite 'sair' para encerrar.\n")
+    print("\n[ASSISTENTE ERP - Tek-System IA com LLaMA 3 via Ollama]")
+    print("Pergunte sobre rotinas fiscais, NFe, SPED, SEFAZ.")
+    print("Digite 'sair' para encerrar, ou 'aprender' para ensinar algo novo.\n")
 
     while True:
         try:
             pergunta = input("Pergunta: ").strip()
             if not pergunta:
                 continue
-            if pergunta.lower() == 'sair':
+            if pergunta.lower() == "sair":
                 print("Encerrando assistente.")
                 break
+            if pergunta.lower().startswith("aprender"):
+                nova_pergunta = input("Nova pergunta: ").strip()
+                nova_resposta = input("Resposta correta: ").strip()
+                treinar_nova_pergunta(nova_pergunta, nova_resposta)
+                continue
 
             documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
 
-            # Se pergunta muito semelhante a alguma da base, retorna resposta direta (sem gerar texto)
             if documentos_relevantes:
                 pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
-                top_doc = documentos_relevantes[0]
-                doc_embedding = modelo_embedding.encode([top_doc.get("pergunta", "")]).reshape(1, -1)
-                similaridade_top = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
-
-                if similaridade_top > 0.90:
-                    resposta = top_doc.get("resposta", "")
-                    print(f"\n[RESPOSTA (base de dados)]: {resposta}\n")
-                    registrar_interacao(pergunta, resposta, [top_doc])
+                doc_top = documentos_relevantes[0]
+                doc_embedding = modelo_embedding.encode([doc_top.get("pergunta", "")]).reshape(1, -1)
+                similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
+                if similaridade > 0.9:
+                    resposta = doc_top.get("resposta", "")
+                    print(f"\n[RESPOSTA (base)]: {resposta}\n")
+                    registrar_interacao(pergunta, resposta, [doc_top])
                     continue
 
-            # Caso contrário, gera resposta com IA
             resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
             registrar_interacao(pergunta, resposta, documentos_relevantes)
-            print(f"\n[RESPOSTA]: {resposta}\n")
+            print(f"\n[RESPOSTA (IA)]: {resposta}\n")
 
         except KeyboardInterrupt:
-            print("\nEncerrando assistente por interrupção manual.")
+            print("\nEncerrando assistente.")
             break
         except Exception as e:
-            print(f"[ERRO] Ocorreu um erro durante a execução: {e}")
+            print(f"[ERRO]: {e}")

@@ -10,8 +10,10 @@ from rag import recuperar_informacoes_relevantes, gerar_resposta_com_ia, registr
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from jose import JWTError, jwt
+from bson import json_util
 import os
 import bcrypt
+import json
 
 # === Configurações ===
 load_dotenv()
@@ -27,15 +29,17 @@ colecao_mensagens = db["mensagens"]
 
 # Inicializa FastAPI
 app = FastAPI()
+
 # Configurar o CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8001", "http://localhost:8001"],  # origens permitidas
+    allow_origins=["http://127.0.0.1:8001", "http://localhost:8001"],
     allow_credentials=True,
-    allow_methods=["*"],   # ou ["POST"]
-    allow_headers=["*"],   # ou ["Content-Type"]
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# Autenticação
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
@@ -49,6 +53,8 @@ def verificar_token(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
+
+# === ROTAS ===
 
 @app.post("/login", response_model=Token)
 def login(usuario: UsuarioLogin):
@@ -99,13 +105,20 @@ def adicionar_mensagem(mensagem: MensagemEntrada):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Texto vazio não permitido")
 
         embedding = modelo_embedding.encode([texto])[0]
-
-        colecao_mensagens.insert_one({
+        doc = {
             "texto": texto,
             "embedding": embedding.tolist()
-        })
+        }
 
-        return {"mensagem": "Mensagem adicionada com sucesso"}
+        resultado = colecao_mensagens.insert_one(doc)
+
+        return JSONResponse(
+            content=json.loads(json_util.dumps({
+                "mensagem": "Mensagem adicionada com sucesso",
+                "id": resultado.inserted_id
+            })),
+            status_code=200
+        )
     except Exception as e:
         print(f"[ERROR] Erro ao adicionar mensagem: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao salvar a mensagem")
@@ -124,7 +137,6 @@ def responder_ia(pergunta_entrada: PerguntaEntrada):
         return JSONResponse(content={"erro": "Erro ao processar a pergunta"}, status_code=500)
 
 
-# ✅ NOVA ROTA PARA RETORNAR USUÁRIO AUTENTICADO
 @app.get("/autenticar/login")
 def get_usuario_autenticado(usuario: dict = Depends(verificar_token)):
     return {
