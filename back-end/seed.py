@@ -33,13 +33,14 @@ def carregar_mensagens_xml(path):
     try:
         tree = ET.parse(path)
         root = tree.getroot()
-        for erro in root.findall("erro"):
-            codigo = erro.get("codigo")
-            descricao = erro.find("descricao").text.strip()
-            solucao = "\n".join([passo.text.strip() for passo in erro.findall("solucao/passo")])
-            mensagem = f"Rejeição {codigo}: {descricao}\nSoluções:\n{solucao}"
-            if mensagem:
-                mensagens.append(mensagem)
+        for item in root.findall("mensagem"):
+            pergunta_el = item.find("pergunta")
+            resposta_el = item.find("resposta")
+
+            if pergunta_el is not None and resposta_el is not None:
+                pergunta = pergunta_el.text.strip()
+                resposta = resposta_el.text.strip()
+                mensagens.append({"pergunta": pergunta, "resposta": resposta})
     except Exception as e:
         print(f"[ERRO] Falha ao ler '{path}': {e}")
     return mensagens
@@ -50,35 +51,40 @@ def carregar_mensagens_fp3(path):
         with open(path, "r", encoding="utf-8") as arquivo:
             conteudo = arquivo.read()
 
-        # Extrai todas as soluções e descrições
         solucoes = re.findall(r'<m17[^>]*u="Solução: (.*?)"\s*/>', conteudo)
         descricoes = re.findall(r'<m18[^>]*u="Descrição: (.*?)"\s*/>', conteudo)
 
         for solucao, descricao in zip(solucoes, descricoes):
             solucao = solucao.replace('&#13;&#10;', '\n').replace('&#34;', '"').strip()
             descricao = descricao.replace('&#13;&#10;', '\n').replace('&#34;', '"').strip()
-            mensagem = f"Descrição:\n{descricao}\n\nSolução:\n{solucao}"
-            mensagens.append(mensagem)
+            mensagens.append({
+                "pergunta": descricao,
+                "resposta": solucao
+            })
 
     except Exception as e:
         print(f"[ERRO] Falha ao ler '{path}': {e}")
     return mensagens
 
 def inserir_mensagens(colecao, mensagens):
-    for texto in mensagens:
+    for item in mensagens:
+        pergunta = item["pergunta"]
+        resposta = item["resposta"]
         try:
-            if colecao.find_one({"texto": texto}):
-                print(f"[SKIP] Já existe: {texto[:60]}...")
+            if colecao.find_one({"pergunta": pergunta}):
+                print(f"[SKIP] Já existe: {pergunta[:60]}...")
                 continue
 
-            embedding = modelo_embedding.encode([texto])[0]
+            embedding = modelo_embedding.encode([pergunta])[0]
             colecao.insert_one({
-                "texto": texto,
+                "pergunta": pergunta,
+                "resposta": resposta,
                 "embedding": embedding.tolist()
             })
-            print(f"[OK] Inserido: {texto[:60]}...")
+            print(f"[OK] Inserido: {pergunta[:60]}...")
+
         except Exception as e:
-            print(f"[ERRO] Falha ao inserir '{texto[:60]}...': {e}")
+            print(f"[ERRO] Falha ao inserir '{pergunta[:60]}...': {e}")
 
 if __name__ == "__main__":
     print("[INFO] Conectando ao MongoDB...")
@@ -88,10 +94,10 @@ if __name__ == "__main__":
     print("[INFO] Carregando mensagens...")
     mensagens = []
 
-    if os.path.exists("mensagens.xml"):
-        mensagens_xml = carregar_mensagens_xml("mensagens.xml")
+    if os.path.exists("mensagens_rag.xml"):
+        mensagens_xml = carregar_mensagens_xml("mensagens_rag.xml")
         mensagens += mensagens_xml
-        print(f"[OK] mensagens.xml carregado com {len(mensagens_xml)} mensagens.")
+        print(f"[OK] mensagens_rag.xml carregado com {len(mensagens_xml)} mensagens.")
 
     if os.path.exists("mensagens.fp3"):
         mensagens_fp3 = carregar_mensagens_fp3("mensagens.fp3")

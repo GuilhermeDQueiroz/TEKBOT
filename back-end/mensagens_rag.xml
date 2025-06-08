@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<mensagens>
+    <mensagem>
+        <pergunta>Rejeição 204: Duplicidade de NF-e</pergunta>
+        <resposta>Essa rejeição ocorre quando uma NF-e com a mesma chave de acesso já foi autorizada anteriormente. Verifique se a nota já foi transmitida e autorizada. Caso positivo, não é necessário reenviá-la.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 205: NF-e está denegada na base de dados da SEFAZ</pergunta>
+        <resposta>A denegação indica que a NF-e foi rejeitada devido a irregularidades fiscais do emitente ou destinatário. Nesse caso, a numeração da nota não pode ser reutilizada. Regularize a situação fiscal para emitir novas notas.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 206: NF-e já está inutilizada na Base de dados da SEFAZ</pergunta>
+        <resposta>Essa rejeição ocorre quando se tenta emitir uma NF-e com um número que já foi inutilizado. Utilize uma nova numeração para a emissão da nota.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 210: UF do Emitente difere da UF autorizadora</pergunta>
+        <resposta>Verifique se a UF do emitente está correta e condizente com o ambiente da SEFAZ autorizadora que está recebendo a nota.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 215: Campo obrigatório não preenchido</pergunta>
+        <resposta>Revise todos os campos obrigatórios do XML da NF-e e preencha os que estiverem faltando conforme especificações técnicas.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 225: Falha no Schema XML</pergunta>
+        <resposta>A estrutura do XML está em desacordo com o Schema definido pela SEFAZ. Verifique o layout e corrija o XML para que esteja conforme a versão vigente.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 327: CFOP inválido para o destinatário</pergunta>
+        <resposta>Verifique se o CFOP é compatível com a operação realizada e com o tipo de contribuinte do destinatário.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 539: Duplicidade de número de NF-e com diferença na Chave de Acesso</pergunta>
+        <resposta>Já existe uma NF-e autorizada com o mesmo número, série e modelo, porém com outra chave de acesso. Altere a numeração da nova nota.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 578: Rejeição: Total do Produto difere do somatório dos itens</pergunta>
+        <resposta>Verifique se o valor total dos produtos no campo total está batendo com a soma dos valores dos itens.</resposta>
+    </mensagem>
+    <mensagem>
+        <pergunta>Rejeição 610: Rejeição: Total da NF difere do somatório dos Valores compõe o valor da NF</pergunta>
+        <resposta>Verifique a fórmula de cálculo dos totais e impostos da nota para que o total geral esteja correto.</resposta>
+    </mensagem>
+</mensagens>

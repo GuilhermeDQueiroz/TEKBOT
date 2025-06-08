@@ -14,6 +14,8 @@ from bson import json_util
 import os
 import bcrypt
 import json
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 # === Configurações ===
 load_dotenv()
@@ -33,7 +35,7 @@ app = FastAPI()
 # Configurar o CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8001", "http://localhost:8001"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -125,16 +127,47 @@ def adicionar_mensagem(mensagem: MensagemEntrada):
 
 
 @app.post("/ia/responder")
-def responder_ia(pergunta_entrada: PerguntaEntrada):
+def responder(pergunta_req: PerguntaEntrada):
+    pergunta = pergunta_req.pergunta.strip()
+
     try:
-        pergunta = pergunta_entrada.pergunta
-        contexto = recuperar_informacoes_relevantes(pergunta)
-        resposta = gerar_resposta_com_ia(contexto, pergunta)
-        registrar_interacao(pergunta, resposta, [doc.get("texto", "") for doc in contexto])
-        return JSONResponse(content={"resposta": resposta}, status_code=200)
+        documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
+
+        # Cálculo da similaridade para checar se já existe resposta alta
+        pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
+
+        melhor_doc = None
+        maior_similaridade = 0
+
+        for doc in documentos_relevantes:
+            # Supomos que o embedding está armazenado no Mongo no formato lista, convertendo para np.array
+            embedding_doc = np.array(doc.get("embedding", []))
+            if embedding_doc.size == 0:
+                # Se não tiver embedding, gera on-the-fly (pode adaptar se quiser)
+                embedding_doc = modelo_embedding.encode([doc.get("texto", "")])[0]
+            embedding_doc = embedding_doc.reshape(1, -1)
+
+            sim = cosine_similarity(pergunta_embedding, embedding_doc)[0][0]
+            if sim > maior_similaridade:
+                maior_similaridade = sim
+                melhor_doc = doc
+
+        LIMIAR_SIMILARIDADE = 0.9  # ajuste conforme teste
+
+        if melhor_doc and maior_similaridade >= LIMIAR_SIMILARIDADE:
+            # Retorna a resposta já existente para similaridade alta
+            resposta = melhor_doc.get("resposta", melhor_doc.get("texto", ""))
+            registrar_interacao(pergunta, resposta, [melhor_doc])
+            return {"resposta": resposta}
+
+        # Caso contrário, gera resposta via IA
+        resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
+        registrar_interacao(pergunta, resposta, documentos_relevantes)
+        return {"resposta": resposta}
+
     except Exception as e:
         print(f"[ERROR] Erro ao responder com IA: {e}")
-        return JSONResponse(content={"erro": "Erro ao processar a pergunta"}, status_code=500)
+        raise HTTPException(status_code=500, detail="Erro interno ao processar a resposta.")
 
 
 @app.get("/autenticar/login")
