@@ -11,10 +11,12 @@ Automatizar o atendimento ao cliente: Reduzir a carga de trabalho dos atendentes
 
 ## 👩‍💻 Tecnologias Usadas
 
-- Vue 3
-- hmtml
-- css
-- javascript
+- Python
+- Html
+- Css
+- JavaScript
+- Ollhama
+- Llhama 3.0
 
 # 🔛 Usando este repositório
 ## Pré-requisitos 
@@ -30,8 +32,10 @@ cd authentique-main; cd authentique
 
 ### Rodando 
 ```
-npm install
-npm run serve
+pip install requiriments.txt
+python rag.py
+uvicorn main:app --reload
+Necessário rodar o modelo via terminal antes.
 ```
 
 PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
