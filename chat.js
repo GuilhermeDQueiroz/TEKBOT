@@ -14,7 +14,7 @@ form.addEventListener("submit", async (e) => {
   const loading = appendMessage("Digitando...", "left");
 
   try {
-    const response = await axios.post("http://localhost:8000/pergunta", {
+    const response = await axios.post("http://localhost:8000/ia/responder", {
       pergunta: msg
     });
 
