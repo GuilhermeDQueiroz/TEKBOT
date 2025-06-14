@@ -143,6 +143,14 @@
     border-bottom-left-radius: 0;
   }
 
+  .avatar {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    object-fit: cover;
+    align-self: flex-end;
+  }
+
 .login-container {
   width: 80%;
   max-width: 400px;
