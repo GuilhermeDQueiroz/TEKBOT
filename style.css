@@ -129,6 +129,7 @@
     max-width: 80ch; /* Limita visualmente a 80 caracteres */
     word-wrap: break-word; /* Quebra palavras longas */
     overflow-wrap: break-word;
+    white-space: pre-wrap;
   }
   
   .message-bubble.right {

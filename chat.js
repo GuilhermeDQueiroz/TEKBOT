@@ -10,7 +10,6 @@ form.addEventListener("submit", async (e) => {
   appendMessage(msg, "right");
   input.value = "";
 
-  // Mensagem de carregamento (opcional)
   const loadingWrapper = appendMessage("Digitando...", "left");
 
   try {
@@ -18,10 +17,12 @@ form.addEventListener("submit", async (e) => {
       pergunta: msg,
     });
 
-    // Remove a mensagem de carregamento
     chat.removeChild(loadingWrapper);
 
-    appendMessage(data.resposta, "left");
+    // ⚠️ Aqui convertemos '\\n' ou '\n' literal em <br>
+    const respostaFormatada = data.resposta.replace(/\\n|\\r\\n|\\\\n|\n/g, "<br>");
+
+    appendMessage(respostaFormatada, "left");
   } catch (error) {
     console.error("Erro ao chamar a IA:", error);
     chat.removeChild(loadingWrapper);
@@ -45,7 +46,6 @@ function appendMessage(message, side) {
   `;
 
   chat.insertAdjacentHTML("beforeend", wrapperHtml);
-
   chat.scrollTop = chat.scrollHeight;
 
   return chat.lastElementChild;
