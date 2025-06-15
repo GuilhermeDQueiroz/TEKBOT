@@ -10,36 +10,43 @@ form.addEventListener("submit", async (e) => {
   appendMessage(msg, "right");
   input.value = "";
 
-  // Mensagem de carregamento (opcional)
-  const loading = appendMessage("Digitando...", "left");
+  const loadingWrapper = appendMessage("Digitando...", "left");
 
   try {
-    const response = await axios.post("http://localhost:8000/pergunta", {
-      pergunta: msg
+    const { data } = await axios.post("http://localhost:8000/ia/responder", {
+      pergunta: msg,
     });
 
-    // Remove a mensagem de carregamento
-    chat.removeChild(loading);
+    chat.removeChild(loadingWrapper);
 
-    appendMessage(response.data.resposta, "left");
+    // ⚠️ Aqui convertemos '\\n' ou '\n' literal em <br>
+    const respostaFormatada = data.resposta.replace(/\\n|\\r\\n|\\\\n|\n/g, "<br>");
+
+    appendMessage(respostaFormatada, "left");
   } catch (error) {
     console.error("Erro ao chamar a IA:", error);
-    chat.removeChild(loading);
+    chat.removeChild(loadingWrapper);
     appendMessage("Erro ao processar a pergunta. Tente novamente.", "left");
   }
 });
 
+/**
+ * Cria e anexa uma mensagem ao chat.
+ * @param {string} message
+ * @param {"left"|"right"} side
+ * @returns {HTMLDivElement}
+ */
 function appendMessage(message, side) {
-  const wrapper = document.createElement("div");
-  wrapper.className = `message-wrapper ${side}`;
+  const wrapperHtml = `
+    <div class="message-wrapper ${side}">
+      ${side === "left" ? `<img class="avatar" src="tekbot.png" alt="TekBot">` : ""}
+      <div class="message-bubble ${side}">${message}</div>
+      ${side === "right" ? `<img class="avatar" src="usuario.png" alt="Usuário">` : ""}
+    </div>
+  `;
 
-  const bubble = document.createElement("div");
-  bubble.className = `message-bubble ${side}`;
-  bubble.innerHTML = `${message}`;
-
-  wrapper.appendChild(bubble);
-  chat.appendChild(wrapper);
+  chat.insertAdjacentHTML("beforeend", wrapperHtml);
   chat.scrollTop = chat.scrollHeight;
 
-  return wrapper; // útil para remover mensagens (ex: carregamento)
+  return chat.lastElementChild;
 }

@@ -106,7 +106,7 @@ def registrar_interacao(pergunta: str, resposta: str, contexto: list):
         "tipo": "interacao",
         "pergunta": pergunta,
         "resposta": resposta,
-        "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto],
+        "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto if isinstance(doc, dict)],
         "data": datetime.now(timezone.utc)
     }
 
