@@ -17,6 +17,11 @@ form.addEventListener("submit", async (e) => {
 
         window.location = '/chat.html';
     } catch (error) {
-        alert('login com erro')
+        Swal.fire({
+            icon: "error",
+            title: "Erro ao logar!",
+            text: "Tente novamente!",
+            
+        });
     }
 });
