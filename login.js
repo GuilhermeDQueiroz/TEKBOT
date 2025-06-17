@@ -21,7 +21,7 @@ form.addEventListener("submit", async (e) => {
             icon: "error",
             title: "Erro ao logar!",
             text: "Tente novamente!",
-            
+            heightAuto:false
         });
     }
 });
