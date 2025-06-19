@@ -6,11 +6,17 @@
   <title>TekBot - Cadastro</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
 <body>
-  <!-- Botão de alternância de tema -->
-  <button id="botao-tema" onclick="alternarTema()">🌙</button>
+   <label class="switch">
+      <input type="checkbox" id="botao-tema">
+      <span class="slider">
+        <i class="fas fa-sun icone sol"></i>
+        <i class="fas fa-moon icone lua"></i>
+      </span>
+    </label>
 
   <div class="login-container" id="login-container">
     <h2 class="login-header">Cadastro</h2>
