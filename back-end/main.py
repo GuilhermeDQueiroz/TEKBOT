@@ -176,3 +176,12 @@ def get_usuario_autenticado(usuario: dict = Depends(verificar_token)):
         "autenticado": True,
         "usuario": usuario
     }
+
+
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
+# Define o caminho base para o diretório TEKBOT
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")

@@ -15,7 +15,7 @@ form.addEventListener("submit", async (e) => {
             senha: senha
         });
 
-        window.location = '/chat.html';
+        window.location = 'http://127.0.0.1:8000/chat.html';
     } catch (error) {
         Swal.fire({
             icon: "error",
