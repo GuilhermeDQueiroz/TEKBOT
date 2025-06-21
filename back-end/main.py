@@ -182,6 +182,9 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 # Define o caminho base para o diretório TEKBOT
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.joinpath("front-end")
 
-app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
+app.mount("/html", StaticFiles(directory=BASE_DIR.joinpath("html"), html=True), name="html_files")
+app.mount("/css", StaticFiles(directory=BASE_DIR.joinpath("css")), name="css_files")
+app.mount("/js", StaticFiles(directory=BASE_DIR.joinpath("js")), name="js_files")
+app.mount("/img", StaticFiles(directory=BASE_DIR.joinpath("img")), name="img_files")
