@@ -7,33 +7,32 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from database import colecao_mensagens
 
-# === Configuração de ambiente ===
+#Configuração de ambiente
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# === Carregar modelo de embeddings ===
+#Carregar modelo de embeddings
 print("[INFO] Carregando modelo de embeddings...")
 modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 print("[OK] Modelo de embeddings carregado.")
 
-# === Info sobre LLaMA via Ollama ===
+#Info sobre LLaMA via Ollama
 print("[INFO] Utilizando LLaMA 3 via Ollama (localhost:11434)...")
 
-# Histórico de conversas
+#Histórico de conversas
 historico_conversas = []
 
-# === Funções ===
+#Funções
 
 def gerar_resposta_com_ia(contexto_relevante, pergunta):
     if not contexto_relevante:
         return "Desculpe, não encontrei informações suficientes para responder à sua pergunta no momento."
 
-    # Monta o contexto baseado nos documentos encontrados
+    #Monta o contexto baseado nos documentos encontrados
     contexto = "\n".join(
         f"Pergunta: {doc.get('pergunta', '')}\nResposta: {doc.get('resposta', '')}"
         for doc in contexto_relevante
     )
 
-    # Prompt estruturado
     prompt = f"""
 Você é um atendente especialista em sistema ERP.
 Com base no histórico abaixo, responda a próxima pergunta do usuário com clareza e objetividade.
@@ -45,7 +44,7 @@ Nova pergunta do usuário: {pergunta}
 Resposta:
 """
 
-    # Requisição para o Ollama (LLaMA 3 rodando localmente)
+    #Requisição para o Ollama
     response = requests.post(
         "http://localhost:11434/api/generate",
         json={
@@ -118,7 +117,6 @@ def registrar_interacao(pergunta: str, resposta: str, contexto: list):
 
 
 def treinar_nova_pergunta(pergunta: str, resposta: str):
-    """Simula aprendizado incremental armazenando a pergunta e resposta como novo dado de conhecimento."""
     try:
         embedding = modelo_embedding.encode([pergunta])[0].tolist()
         novo_conhecimento = {
@@ -133,7 +131,7 @@ def treinar_nova_pergunta(pergunta: str, resposta: str):
     except Exception as e:
         print(f"[ERRO] Falha ao treinar nova pergunta: {e}")
 
-# === Execução via terminal ===
+#Execução via terminal
 if __name__ == "__main__":
     print("\n[ASSISTENTE ERP - Tek-System IA com LLaMA 3 via Ollama]")
     print("Pergunte sobre rotinas fiscais, NFe, SPED, SEFAZ.")

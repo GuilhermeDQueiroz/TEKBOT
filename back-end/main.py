@@ -23,16 +23,16 @@ MONGO_URI = os.getenv("MONGO_URI")
 SECRET_KEY = os.getenv("SECRET_KEY", "sua_chave_secreta")  # Substitua por sua chave real
 ALGORITHM = "HS256"
 
-# Conecta ao MongoDB
+#Conecta ao MongoDB
 client = MongoClient(MONGO_URI)
 db = client["tekbot"]
 colecao_usuarios = db["usuarios"]
 colecao_mensagens = db["mensagens"]
 
-# Inicializa FastAPI
+#Inicializa FastAPI
 app = FastAPI()
 
-# Configurar o CORS
+#Configurar o CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Autenticação
+#Autenticação
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
@@ -56,7 +56,7 @@ def verificar_token(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
 
-# === ROTAS ===
+#=== ROTAS ===
 
 @app.post("/login", response_model=Token)
 def login(usuario: UsuarioLogin):
@@ -133,17 +133,17 @@ def responder(pergunta_req: PerguntaEntrada):
     try:
         documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
 
-        # Cálculo da similaridade para checar se já existe resposta alta
+        #Cálculo da similaridade para checar se já existe resposta alta
         pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
 
         melhor_doc = None
         maior_similaridade = 0
 
         for doc in documentos_relevantes:
-            # Supomos que o embedding está armazenado no Mongo no formato lista, convertendo para np.array
+            
             embedding_doc = np.array(doc.get("embedding", []))
             if embedding_doc.size == 0:
-                # Se não tiver embedding, gera on-the-fly (pode adaptar se quiser)
+               
                 embedding_doc = modelo_embedding.encode([doc.get("texto", "")])[0]
             embedding_doc = embedding_doc.reshape(1, -1)
 
@@ -152,15 +152,15 @@ def responder(pergunta_req: PerguntaEntrada):
                 maior_similaridade = sim
                 melhor_doc = doc
 
-        LIMIAR_SIMILARIDADE = 0.9  # ajuste conforme teste
+        LIMIAR_SIMILARIDADE = 0.9  #ajuste conforme necessário
 
         if melhor_doc and maior_similaridade >= LIMIAR_SIMILARIDADE:
-            # Retorna a resposta já existente para similaridade alta
+            #Retorna a resposta já existente para similaridade alta
             resposta = melhor_doc.get("resposta", melhor_doc.get("texto", ""))
             registrar_interacao(pergunta, resposta, [melhor_doc])
             return {"resposta": resposta}
 
-        # Caso contrário, gera resposta via IA
+        #gera resposta via IA
         resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
         registrar_interacao(pergunta, resposta, documentos_relevantes)
         return {"resposta": resposta}
@@ -181,7 +181,6 @@ def get_usuario_autenticado(usuario: dict = Depends(verificar_token)):
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-# Define o caminho base para o diretório TEKBOT
 BASE_DIR = Path(__file__).resolve().parent.parent.joinpath("front-end")
 
 app.mount("/html", StaticFiles(directory=BASE_DIR.joinpath("html"), html=True), name="html_files")
