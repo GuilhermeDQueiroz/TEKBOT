@@ -34,14 +34,14 @@ def gerar_resposta_com_ia(contexto_relevante, pergunta):
     )
 
     prompt = f"""
-Você é um atendente especialista em sistema ERP.
-Com base no histórico abaixo, responda a próxima pergunta do usuário com clareza e objetividade.
+Você é um especialista em sistemas fiscais e SEFAZ.
+Use as informações abaixo como base de conhecimento técnica para responder à pergunta do usuário com clareza e objetividade.
 
-Histórico de perguntas e respostas:
+Base de conhecimento:
 {contexto}
 
-Nova pergunta do usuário: {pergunta}
-Resposta:
+Pergunta: {pergunta}
+Resposta objetiva, sem mencionar se a pergunta já foi feita antes:
 """
 
     #Requisição para o Ollama
@@ -153,17 +153,27 @@ if __name__ == "__main__":
 
             documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
 
-            if documentos_relevantes:
-                pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
-                doc_top = documentos_relevantes[0]
-                doc_embedding = modelo_embedding.encode([doc_top.get("pergunta", "")]).reshape(1, -1)
-                similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
-                if similaridade > 0.9:
-                    resposta = doc_top.get("resposta", "")
-                    print(f"\n[RESPOSTA (base)]: {resposta}\n")
-                    registrar_interacao(pergunta, resposta, [doc_top])
-                    continue
+            # Refina para pegar a pergunta mais parecida (e evitar responder duplicado)
+            pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
+            encontrou_pergunta_igual = False
 
+            for doc in documentos_relevantes:
+                doc_embedding = modelo_embedding.encode([doc.get("pergunta", "")]).reshape(1, -1)
+                similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
+                if similaridade >= 0.95:
+                    # Garante que não é a mesma resposta anterior (evita redundância do tipo "você já perguntou...")
+                    if doc.get("resposta", "").strip().lower().startswith("não retransmita") or "você já perguntou" in doc.get("resposta", "").lower():
+                        continue
+                    resposta = doc.get("resposta", "")
+                    print(f"\n[RESPOSTA (base conhecida)]: {resposta}\n")
+                    registrar_interacao(pergunta, resposta, [doc])
+                    encontrou_pergunta_igual = True
+                    break
+
+            if encontrou_pergunta_igual:
+                continue
+
+            # Caso não encontre resposta diretamente relacionada, usa LLaMA com contexto
             resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
             registrar_interacao(pergunta, resposta, documentos_relevantes)
             print(f"\n[RESPOSTA (IA)]: {resposta}\n")
