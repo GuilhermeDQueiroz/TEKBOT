@@ -450,16 +450,18 @@ input:checked+.slider .lua {
 }
 
 
-/* Centralização para telas como redefinir senha */
 body.redefinir-body {
+  width: 100%;
   min-height: 100vh;
   margin: 0;
+  padding: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  background-color: var(--bg-color, #fff); /* ajusta com o tema se necessário */
+  background-color: var(--bg-color, #fff);
+  box-sizing: border-box;
 }
+
 .redefinir-container {
   background-color: white;
   border-radius: 1rem;
