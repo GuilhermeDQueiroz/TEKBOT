@@ -53,7 +53,7 @@ body {
 
 .chat-title {
   margin-right: auto;
-  color: inherit;
+  color: #2196f3;
 }
 
 .logout-button {
@@ -73,14 +73,6 @@ body {
 .logout-button:hover {
   background-color: #1976d2;
 }
-
-/* Tema escuro */
-body.escuro .logout-button {
-  background-color: transparent;
-  border: 1px solid #2196f3;
-  color: white;
-}
-
 
 .chat-main {
   flex: 1;
