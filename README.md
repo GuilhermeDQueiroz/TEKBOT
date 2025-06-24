@@ -1,11 +1,5 @@
 # TEKBOT 🤖
 
-## 🌐 Site do projeto [aqui](https://-authentiquepi.netlify.app/)
-
-## FIGMA [aqui](https://-www.figma.com/proto/gZIndmESY0ShsgJ8elLYOu/Projeto-integrador?node-id=111-412&t=5zPIBgipzBTqruqq-1)
-
-## 📝 Documentação [aqui](https://-documenter.getpostman.com/view/36194350/2sAXjSyoYc) e [aqui](https://docs.google.com/document/d/1fdmsadEBWa4jsjWFRi1Ugz085ejMnIevyaJtW1IkjWE/edit?usp=sharing) 
-
 ## 🧐 Sobre o projeto
 Automatizar o atendimento ao cliente: Reduzir a carga de trabalho dos atendentes humanos ao responder perguntas frequentes e resolver problemas simples. • Melhorar a experiência do cliente: Proporcionar um atendimento rápido, 24 horas por dia, 7 dias por semana, com respostas precisas e úteis. • Integrar com o ERP: Sincronizar informações relevantes entre o chatbot e o ERP para manter um registro completo das interações com os clientes. • Coletar dados para análise: Utilizar as interações com o chatbot para coletar dados e gerar insights sobre as necessidades e comportamentos dos clientes.
 
@@ -15,26 +9,10 @@ Automatizar o atendimento ao cliente: Reduzir a carga de trabalho dos atendentes
 - hmtml
 - css
 - javascript
+- Python
+- Llama 3 7B
 
-# 🔛 Usando este repositório
-## Pré-requisitos 
-Para rodar este projeto no "modo desenvolvedor", você precisa ter o ambiente básico para rodar uma aplicação com Vue. Você pode encontrar essas informações [aqui](https://vuejs.org/).
-
-## Instalando 
-### Clonando o repositório
-```
-git clone https://github.com/GuilhermeDQueiroz/authentique
-
-cd authentique-main; cd authentique
-```
-
-### Rodando 
-```
-npm install
-npm run serve
-```
-
-PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
+## 📌 PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
 
 1) Motivação
 A crescente demanda por atendimento ao cliente rápido e eficiente tem levado as empresas a
