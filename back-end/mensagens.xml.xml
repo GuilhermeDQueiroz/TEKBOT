@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+<article lang="">
+  <para>&lt;?xml version="1.0" encoding="UTF-8"?&gt;&#13;</para>
+  <para>&lt;mensagens&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 100 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 100 ocorre quando o CÃ³digo da UF do emitente estÃ¡ invÃ¡lido. Verifique se o cÃ³digo da UF (UF emitente) estÃ¡ correto conforme a tabela oficial IBGE.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 101 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 101 ocorre quando a Chave de Acesso estÃ¡ invÃ¡lida. Verifique se todos os campos que compÃµem a chave (CNPJ, modelo, sÃ©rie, nÃºmero, cÃ³digo numÃ©rico, UF, etc.) estÃ£o corretos.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 102 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 102 indica que a NF-e jÃ¡ foi cancelada anteriormente. Verifique o status da NF-e no sistema da SEFAZ e se necessÃ¡rio, utilize um novo nÃºmero para emissÃ£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 103 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 103 ocorre quando a NF-e jÃ¡ foi inutilizada para o nÃºmero informado. Use outro nÃºmero vÃ¡lido para emissÃ£o da NF-e.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 104 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 104 indica que a NF-e jÃ¡ foi emitida anteriormente com a mesma chave de acesso. Verifique duplicidade de nÃºmeros e corrija para evitar emissÃ£o repetida.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 105 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 105 ocorre quando a data de emissÃ£o da NF-e estÃ¡ fora do intervalo permitido. Ajuste a data para o perÃ­odo vÃ¡lido definido pela legislaÃ§Ã£o vigente.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 106 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 106 indica que a NF-e foi emitida com data futura nÃ£o permitida. Corrija a data para que nÃ£o ultrapasse a data atual.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 107 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 107 ocorre quando o nÃºmero da NF-e informado estÃ¡ fora da faixa autorizada. Verifique autorizaÃ§Ã£o e ajuste o nÃºmero para o intervalo correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 108 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 108 indica que a sÃ©rie da NF-e estÃ¡ invÃ¡lida ou fora do intervalo autorizado. Corrija o nÃºmero da sÃ©rie conforme autorizaÃ§Ã£o da SEFAZ.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 109 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 109 ocorre quando o modelo da NF-e informado Ã© invÃ¡lido. Utilize modelo vÃ¡lido, geralmente 55 para NF-e e 65 para NFC-e.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 110 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 110 indica que a chave de acesso jÃ¡ foi utilizada para outra NF-e. Verifique duplicidade e use nÃºmero e sÃ©rie vÃ¡lidos para emissÃ£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 111 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 111 ocorre quando o CNPJ do emitente estÃ¡ invÃ¡lido ou nÃ£o cadastrado na SEFAZ. Corrija o CNPJ para um vÃ¡lido e cadastrado.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 112 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 112 indica que o CNPJ do destinatÃ¡rio estÃ¡ invÃ¡lido. Verifique e corrija o CNPJ do destinatÃ¡rio no XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 113 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 113 ocorre quando o CPF do destinatÃ¡rio estÃ¡ invÃ¡lido. Verifique e corrija o CPF no arquivo XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 114 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 114 indica que o campo IE (InscriÃ§Ã£o Estadual) do destinatÃ¡rio estÃ¡ invÃ¡lido para o estado informado. Verifique a consistÃªncia da IE e do estado.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 115 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 115 ocorre quando o CPF e CNPJ do destinatÃ¡rio estÃ£o ausentes ou invÃ¡lidos. Deve informar pelo menos um deles vÃ¡lido.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 116 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 116 indica que o endereÃ§o do destinatÃ¡rio estÃ¡ incompleto ou invÃ¡lido. Preencha todos os campos obrigatÃ³rios corretamente.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 117 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 117 ocorre quando o campo UF do destinatÃ¡rio estÃ¡ invÃ¡lido ou ausente. Informe a UF correta conforme tabela IBGE.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 118 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 118 indica que o cÃ³digo do municÃ­pio do destinatÃ¡rio estÃ¡ invÃ¡lido. Use o cÃ³digo IBGE correto para o municÃ­pio.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 119 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 119 ocorre quando o CEP do destinatÃ¡rio estÃ¡ invÃ¡lido ou ausente. Corrija o CEP para o formato vÃ¡lido (somente nÃºmeros, 8 dÃ­gitos).&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 120 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 120 indica que o campo do nÃºmero do endereÃ§o estÃ¡ vazio ou incorreto. Informe o nÃºmero correto ou "SN" se nÃ£o houver nÃºmero.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 121 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 121 ocorre quando o nome do destinatÃ¡rio estÃ¡ vazio ou incorreto. Preencha corretamente o nome ou razÃ£o social.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 122 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 122 indica que o campo telefone do destinatÃ¡rio estÃ¡ incorreto. Corrija o telefone conforme padrÃ£o nacional.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 123 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 123 ocorre quando o valor total da NF-e nÃ£o confere com o somatÃ³rio dos itens. Revise os valores unitÃ¡rios, quantidades e descontos.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 124 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 124 indica divergÃªncia no valor do ICMS total em relaÃ§Ã£o ao somatÃ³rio dos itens. Corrija os cÃ¡lculos do ICMS para manter a consistÃªncia.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 125 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 125 ocorre quando a base de cÃ¡lculo do ICMS estÃ¡ invÃ¡lida. Corrija os valores conforme a legislaÃ§Ã£o vigente.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 126 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 126 indica erro no cÃ¡lculo do ICMS-ST. Revise o cÃ¡lculo do Substituto TributÃ¡rio e corrija os valores no XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 127 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 127 ocorre quando o cÃ³digo fiscal de operaÃ§Ã£o (CFOP) estÃ¡ invÃ¡lido ou incompatÃ­vel com o tipo da operaÃ§Ã£o. Verifique e corrija o CFOP.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 128 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 128 indica que o cÃ³digo do produto informado estÃ¡ invÃ¡lido ou inexistente no cadastro da SEFAZ. Corrija o cÃ³digo para o correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 129 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 129 ocorre quando a descriÃ§Ã£o do produto estÃ¡ vazia ou invÃ¡lida. Preencha corretamente o campo de descriÃ§Ã£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 130 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 130 indica divergÃªncia no valor unitÃ¡rio do produto em relaÃ§Ã£o ao valor total e quantidade. Ajuste os valores para manter a consistÃªncia.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 131 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 131 ocorre quando o NCM do produto estÃ¡ invÃ¡lido ou inexistente. Corrija o cÃ³digo NCM conforme tabela oficial.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 132 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 132 indica que o cÃ³digo de tributaÃ§Ã£o do ICMS do produto estÃ¡ invÃ¡lido. Verifique o CST/CSOSN e corrija conforme a legislaÃ§Ã£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 133 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 133 ocorre quando a alÃ­quota do ICMS informada Ã© invÃ¡lida. Corrija o percentual da alÃ­quota para o valor correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 134 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 134 indica que o cÃ³digo do CEST estÃ¡ invÃ¡lido ou ausente para produto sujeito ao regime de substituiÃ§Ã£o tributÃ¡ria. Corrija o cÃ³digo conforme tabela vÃ¡lida.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 135 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 135 ocorre quando o valor do frete informado estÃ¡ invÃ¡lido. Revise os valores do frete e corrija no XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 136 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 136 indica erro no valor do seguro da mercadoria. Corrija o valor informado ou remova caso nÃ£o haja seguro.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 137 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 137 ocorre quando o valor do desconto Ã© invÃ¡lido ou maior que o valor da mercadoria. Ajuste o valor do desconto corretamente.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 138 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 138 indica divergÃªncia no valor total do IPI em relaÃ§Ã£o ao somatÃ³rio dos itens. Revise e corrija os valores do IPI.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 139 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 139 ocorre quando o cÃ³digo de situaÃ§Ã£o tributÃ¡ria do IPI estÃ¡ invÃ¡lido. Corrija conforme tabela vigente.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 140 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 140 indica erro no cÃ³digo de enquadramento legal do IPI. Verifique e ajuste para o cÃ³digo correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 141 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 141 ocorre quando o valor do PIS informado estÃ¡ incorreto. Revise os valores e corrija.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 142 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 142 indica que o cÃ³digo do PIS estÃ¡ invÃ¡lido ou incompatÃ­vel. Corrija conforme tabela oficial.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 143 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 143 ocorre quando o valor do COFINS estÃ¡ incorreto. Revise e corrija os valores no XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 144 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 144 indica que o cÃ³digo do COFINS estÃ¡ invÃ¡lido ou incompatÃ­vel. Ajuste para o cÃ³digo correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 150 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 150 ocorre quando a data de saÃ­da ou entrada estÃ¡ anterior Ã  data de emissÃ£o da NF-e. Ajuste a data para ser igual ou posterior Ã  data de emissÃ£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 151 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 151 indica que a data de entrada da mercadoria Ã© invÃ¡lida para a operaÃ§Ã£o realizada. Verifique e corrija conforme legislaÃ§Ã£o.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 152 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 152 ocorre quando o cÃ³digo do destinatÃ¡rio Ã© invÃ¡lido para operaÃ§Ãµes interestaduais. Corrija o cÃ³digo do destinatÃ¡rio conforme regra.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 153 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 153 indica que o valor do ICMS de operaÃ§Ãµes interestaduais estÃ¡ inconsistente. Revise e corrija os valores.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 154 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 154 ocorre quando o indicador de presenÃ§a do comprador estÃ¡ invÃ¡lido ou ausente. Informe o cÃ³digo correto conforme tabela.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 155 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 155 indica erro na identificaÃ§Ã£o do transportador. Verifique os campos de transportador e corrija.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 156 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 156 ocorre quando o cÃ³digo do municÃ­pio do transportador estÃ¡ invÃ¡lido. Ajuste para o cÃ³digo correto.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 157 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 157 indica inconsistÃªncia no valor do frete informado. Revise e corrija os valores no XML.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 158 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 158 ocorre quando o modal do frete estÃ¡ incorreto ou ausente. Informe corretamente o modal utilizado (rodoviÃ¡rio, aÃ©reo, etc.).&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 159 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 159 indica erro na informaÃ§Ã£o de volume da mercadoria. Verifique peso, dimensÃµes e quantidade declarada.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 160 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 160 ocorre quando o valor do seguro do transporte estÃ¡ invÃ¡lido. Corrija o valor ou remova se nÃ£o houver seguro.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 161 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 161 indica que o cÃ³digo ANTT do transportador estÃ¡ invÃ¡lido. Corrija conforme cadastro ANTT.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 162 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 162 ocorre quando o cÃ³digo do veÃ­culo do transporte estÃ¡ incorreto. Revise e corrija.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>  &lt;mensagem&gt;&#13;</para>
+  <para>    &lt;pergunta&gt;Como corrigir rejeiÃ§Ã£o 163 da SEFAZ?&lt;/pergunta&gt;&#13;</para>
+  <para>    &lt;resposta&gt;A rejeiÃ§Ã£o 163 indica erro na identificaÃ§Ã£o do motorista. Verifique CPF, nome e registro.&lt;/resposta&gt;&#13;</para>
+  <para>  &lt;/mensagem&gt;&#13;</para>
+  <para>&lt;/mensagens&gt;&#13;</para>
+</article>

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 from pydantic import BaseModel
+=======
+from pydantic import BaseModel, EmailStr
+>>>>>>> Master
 
 # Classe para criar um usuário
 class UsuarioCriar(BaseModel):
@@ -27,3 +31,12 @@ class PerguntaEntrada(BaseModel):
 class MensagemEntrada(BaseModel):
     texto: str
 
+<<<<<<< HEAD
+=======
+class RecuperacaoSenha(BaseModel):
+    email: EmailStr
+
+class RedefinirSenha(BaseModel):
+    token: str
+    nova_senha: str
+>>>>>>> Master

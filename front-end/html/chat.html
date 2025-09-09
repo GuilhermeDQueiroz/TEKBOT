@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TekBot</title>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+
+<body>
+  <label class="switch">
+    <input type="checkbox" id="botao-tema">
+    <span class="slider">
+      <i class="fas fa-sun icone sol"></i>
+      <i class="fas fa-moon icone lua"></i>
+    </span>
+  </label>
+
+  <div class="chat-container">
+    <header class="chat-header">
+      <span class="chat-title">TekBot</span>
+      <button class="logout-button" onclick="voltarParaLogin()">
+        <i class="fas fa-sign-out-alt"></i> Sair
+      </button>
+    </header>
+
+    <main id="chat" class="chat-main">
+      <!-- Mensagens vão aqui -->
+    </main>
+
+    <form id="chat-form" class="chat-form">
+      <input id="user-input" type="text" placeholder="Digite sua mensagem..." class="chat-input" autocomplete="off"
+        required />
+      <button type="submit" class="chat-button">Enviar</button>
+    </form>
+  </div>
+
+  <script src="../js/chat.js"></script>
+  <script src="../js/tema.js"></script>
+</body>
+
+</html>
