@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from typing import List
-from schemas import PerguntaEntrada, MensagemEntrada
+from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha
 from models import UsuarioLogin, Token
 from auth import create_access_token
 from rag import recuperar_informacoes_relevantes, gerar_resposta_com_ia, registrar_interacao, modelo_embedding
@@ -11,11 +11,16 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 from bson import json_util
+from datetime import timedelta
+from email.message import EmailMessage
 import os
 import bcrypt
 import json
+import smtplib
+import traceback
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from datetime import timedelta
 
 # === Configurações ===
 load_dotenv()
@@ -54,6 +59,33 @@ def verificar_token(token: str = Depends(oauth2_scheme)):
         return {"email": email}
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+
+def enviar_email_recuperacao(destinatario: str, token: str):
+    email_remetente = os.getenv("EMAIL_REMETENTE")
+    email_senha = os.getenv("EMAIL_SENHA")
+
+    if not email_remetente or not email_senha:
+        raise Exception("Variáveis de ambiente de e-mail não encontradas")
+
+    msg = EmailMessage()
+    msg["Subject"] = "Recuperação de senha - TekBot"
+    msg["From"] = email_remetente
+    msg["To"] = destinatario
+
+    link = f"http://localhost:8000/html/redefinir-senha.html?token={token}"  # ajuste conforme seu front
+    msg.set_content(f"""
+Olá! Você solicitou a redefinição de senha do TekBot.
+
+Clique no link abaixo para redefinir sua senha:
+{link}
+
+Se você não fez essa solicitação, ignore este e-mail.
+""")
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(email_remetente, email_senha)
+        smtp.send_message(msg)
 
 
 # === ROTAS ===
@@ -140,10 +172,10 @@ def responder(pergunta_req: PerguntaEntrada):
         maior_similaridade = 0
 
         for doc in documentos_relevantes:
-            # Supomos que o embedding está armazenado no Mongo no formato lista, convertendo para np.array
+
             embedding_doc = np.array(doc.get("embedding", []))
             if embedding_doc.size == 0:
-                # Se não tiver embedding, gera on-the-fly (pode adaptar se quiser)
+
                 embedding_doc = modelo_embedding.encode([doc.get("texto", "")])[0]
             embedding_doc = embedding_doc.reshape(1, -1)
 
@@ -152,7 +184,7 @@ def responder(pergunta_req: PerguntaEntrada):
                 maior_similaridade = sim
                 melhor_doc = doc
 
-        LIMIAR_SIMILARIDADE = 0.9  # ajuste conforme teste
+        LIMIAR_SIMILARIDADE = 0.9  # ajuste conforme necessário
 
         if melhor_doc and maior_similaridade >= LIMIAR_SIMILARIDADE:
             # Retorna a resposta já existente para similaridade alta
@@ -160,7 +192,7 @@ def responder(pergunta_req: PerguntaEntrada):
             registrar_interacao(pergunta, resposta, [melhor_doc])
             return {"resposta": resposta}
 
-        # Caso contrário, gera resposta via IA
+        # gera resposta via IA
         resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
         registrar_interacao(pergunta, resposta, documentos_relevantes)
         return {"resposta": resposta}
@@ -178,10 +210,57 @@ def get_usuario_autenticado(usuario: dict = Depends(verificar_token)):
     }
 
 
+@app.post("/redefinir-senha")
+def redefinir_senha(dados: RedefinirSenha):
+    try:
+        payload = jwt.decode(dados.token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+
+        nova_senha_hash = bcrypt.hashpw(dados.nova_senha.encode(), bcrypt.gensalt()).decode()
+        resultado = colecao_usuarios.update_one({"email": email}, {"$set": {"senha": nova_senha_hash}})
+        if resultado.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado ou senha não atualizada")
+
+        return {"mensagem": "Senha redefinida com sucesso"}
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Token inválido ou expirado")
+    
+
+@app.post("/recuperar-senha")
+def recuperar_senha(dados: RecuperacaoSenha):
+    try:
+        print("🔍 E-mail recebido:", dados.email)
+
+        usuario = colecao_usuarios.find_one({"email": dados.email})
+        if not usuario:
+            print("❌ Usuário não encontrado")
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        print("✅ Usuário encontrado:", usuario["email"])
+
+        # Aqui usa o parâmetro correto "tempo_expiracao"
+        token = create_access_token(dados={"sub": dados.email}, tempo_expiracao=timedelta(minutes=15))
+        print("🔐 Token gerado:", token)
+
+        enviar_email_recuperacao(dados.email, token)
+
+        print("✅ E-mail enviado com sucesso")
+        return {"mensagem": "E-mail de recuperação enviado com sucesso"}
+
+    except Exception as e:
+        print("🔥 ERRO AO ENVIAR E-MAIL:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar o e-mail: {str(e)}")
+
+
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-# Define o caminho base para o diretório TEKBOT
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.joinpath("front-end")
 
-app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
+app.mount("/html", StaticFiles(directory=BASE_DIR.joinpath("html"), html=True), name="html_files")
+app.mount("/css", StaticFiles(directory=BASE_DIR.joinpath("css")), name="css_files")
+app.mount("/js", StaticFiles(directory=BASE_DIR.joinpath("js")), name="js_files")
+app.mount("/img", StaticFiles(directory=BASE_DIR.joinpath("img")), name="img_files")
