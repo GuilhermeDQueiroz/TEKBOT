@@ -30,7 +30,7 @@ print("[INFO] Utilizando a API do Gemini (Google AI)...")
 
 # === Funções ===
 
-def gerar_resposta_com_ia(contexto_relevante, pergunta):
+def gerarRespostaComIa(contexto_relevante, pergunta):
     """Gera uma resposta usando a API do Gemini com base em um contexto."""
     if not contexto_relevante:
         return "Desculpe, não encontrei informações suficientes para responder à sua pergunta no momento."
@@ -72,7 +72,7 @@ Resposta:
         return "Erro ao gerar resposta com a IA do Gemini."
 
 
-def recuperar_informacoes_relevantes(pergunta: str):
+def recuperarInfoRelevantes(pergunta: str):
     try:
         documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
     except Exception as e:
@@ -111,7 +111,7 @@ def recuperar_informacoes_relevantes(pergunta: str):
     return [doc for doc, sim in documentos_com_similaridade[:5] if sim > 0.6]
 
 
-def registrar_interacao(pergunta: str, resposta: str, contexto: list):
+def registrarInteracao(pergunta: str, resposta: str, contexto: list):
     interacao = {
         "tipo": "interacao",
         "pergunta": pergunta,
@@ -126,7 +126,7 @@ def registrar_interacao(pergunta: str, resposta: str, contexto: list):
         print(f"[ERRO] Falha ao salvar interação: {e}")
 
 
-def treinar_nova_pergunta(pergunta: str, resposta: str):
+def treinarNovaPergunta(pergunta: str, resposta: str):
     """Simula aprendizado incremental armazenando a pergunta e resposta como novo dado de conhecimento."""
     try:
         embedding = modelo_embedding.encode([pergunta])[0].tolist()
@@ -159,10 +159,10 @@ if __name__ == "__main__":
             if pergunta.lower().startswith("aprender"):
                 nova_pergunta = input("Nova pergunta: ").strip()
                 nova_resposta = input("Resposta correta: ").strip()
-                treinar_nova_pergunta(nova_pergunta, nova_resposta)
+                treinarNovaPergunta(nova_pergunta, nova_resposta)
                 continue
 
-            documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
+            documentos_relevantes = recuperarInfoRelevantes(pergunta)
 
             # Otimização: Se a pergunta for muito similar a uma já existente, usa a resposta direta
             if documentos_relevantes:
@@ -173,11 +173,11 @@ if __name__ == "__main__":
                 if similaridade > 0.9:
                     resposta = doc_top.get("resposta", "")
                     print(f"\n[RESPOSTA (base)]: {resposta}\n")
-                    registrar_interacao(pergunta, resposta, [doc_top])
+                    registrarInteracao(pergunta, resposta, [doc_top])
                     continue
 
-            resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
-            registrar_interacao(pergunta, resposta, documentos_relevantes)
+            resposta = gerarRespostaComIa(documentos_relevantes, pergunta)
+            registrarInteracao(pergunta, resposta, documentos_relevantes)
             print(f"\n[RESPOSTA (IA)]: {resposta}\n")
 
         except KeyboardInterrupt:

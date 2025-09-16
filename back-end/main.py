@@ -6,7 +6,7 @@ from typing import List
 from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha
 from models import UsuarioLogin, Token
 from auth import create_access_token
-from rag import recuperar_informacoes_relevantes, gerar_resposta_com_ia, registrar_interacao, modelo_embedding
+from rag import recuperarInfoRelevantes, gerarRespostaComIa, registrarInteracao, modelo_embedding
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from jose import JWTError, jwt
@@ -61,7 +61,7 @@ def verificar_token(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
 
-def enviar_email_recuperacao(destinatario: str, token: str):
+def enviarEmailRecuperacao(destinatario: str, token: str):
     email_remetente = os.getenv("EMAIL_REMETENTE")
     email_senha = os.getenv("EMAIL_SENHA")
 
@@ -122,9 +122,9 @@ def register_user(usuario: UsuarioLogin):
 def responder_pergunta(pergunta_entrada: PerguntaEntrada):
     try:
         pergunta = pergunta_entrada.pergunta
-        contexto = recuperar_informacoes_relevantes(pergunta)
-        resposta = gerar_resposta_com_ia(contexto, pergunta)
-        registrar_interacao(pergunta, resposta, [doc.get("texto", "") for doc in contexto])
+        contexto = recuperarInfoRelevantes(pergunta)
+        resposta = gerarRespostaComIa(contexto, pergunta)
+        registrarInteracao(pergunta, resposta, [doc.get("texto", "") for doc in contexto])
         return {"resposta": resposta}
     except Exception as e:
         print(f"[ERROR] Erro ao processar a pergunta: {e}")
@@ -163,7 +163,7 @@ def responder(pergunta_req: PerguntaEntrada):
     pergunta = pergunta_req.pergunta.strip()
 
     try:
-        documentos_relevantes = recuperar_informacoes_relevantes(pergunta)
+        documentos_relevantes = recuperarInfoRelevantes(pergunta)
 
         # Cálculo da similaridade para checar se já existe resposta alta
         pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
@@ -189,12 +189,12 @@ def responder(pergunta_req: PerguntaEntrada):
         if melhor_doc and maior_similaridade >= LIMIAR_SIMILARIDADE:
             # Retorna a resposta já existente para similaridade alta
             resposta = melhor_doc.get("resposta", melhor_doc.get("texto", ""))
-            registrar_interacao(pergunta, resposta, [melhor_doc])
+            registrarInteracao(pergunta, resposta, [melhor_doc])
             return {"resposta": resposta}
 
         # gera resposta via IA
-        resposta = gerar_resposta_com_ia(documentos_relevantes, pergunta)
-        registrar_interacao(pergunta, resposta, documentos_relevantes)
+        resposta = gerarRespostaComIa(documentos_relevantes, pergunta)
+        registrarInteracao(pergunta, resposta, documentos_relevantes)
         return {"resposta": resposta}
 
     except Exception as e:
@@ -244,7 +244,7 @@ def recuperar_senha(dados: RecuperacaoSenha):
         token = create_access_token(dados={"sub": dados.email}, tempo_expiracao=timedelta(minutes=15))
         print("🔐 Token gerado:", token)
 
-        enviar_email_recuperacao(dados.email, token)
+        enviarEmailRecuperacao(dados.email, token)
 
         print("✅ E-mail enviado com sucesso")
         return {"mensagem": "E-mail de recuperação enviado com sucesso"}

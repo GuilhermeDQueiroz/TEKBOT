@@ -28,7 +28,7 @@ def conectar_mongodb(uri):
         print(f"[ERRO] Falha na conexão com o MongoDB: {e}")
         sys.exit(1)
 
-def carregar_mensagens_xml(path):
+def carregarMensagemXml(path):
     mensagens = []
     try:
         tree = ET.parse(path)
@@ -45,7 +45,7 @@ def carregar_mensagens_xml(path):
         print(f"[ERRO] Falha ao ler '{path}': {e}")
     return mensagens
 
-def carregar_mensagens_fp3(path):
+def carregarMensagemFp3(path):
     mensagens = []
     try:
         with open(path, "r", encoding="utf-8") as arquivo:
@@ -95,12 +95,12 @@ if __name__ == "__main__":
     mensagens = []
 
     if os.path.exists("mensagens_rag.xml"):
-        mensagens_xml = carregar_mensagens_xml("mensagens_rag.xml")
+        mensagens_xml = carregarMensagemXml("mensagens_rag.xml")
         mensagens += mensagens_xml
         print(f"[OK] mensagens_rag.xml carregado com {len(mensagens_xml)} mensagens.")
 
     if os.path.exists("mensagens.fp3"):
-        mensagens_fp3 = carregar_mensagens_fp3("mensagens.fp3")
+        mensagens_fp3 = carregarMensagemFp3("mensagens.fp3")
         mensagens += mensagens_fp3
         print(f"[OK] mensagens.fp3 carregado com {len(mensagens_fp3)} mensagens.")
 
