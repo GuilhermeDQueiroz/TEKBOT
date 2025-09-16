@@ -5,14 +5,34 @@ Automatizar o atendimento ao cliente: Reduzir a carga de trabalho dos atendentes
 
 ## 👩‍💻 Tecnologias Usadas
 
-- Vue 3
-- hmtml
-- css
-- javascript
 - Python
-- Llama 3 7B
+- Html
+- Css
+- JavaScript
+- Ollhama
+- Llhama 3.0
 
-## 📌 PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
+# 🔛 Usando este repositório
+## Pré-requisitos 
+Para rodar este projeto no "modo desenvolvedor", você precisa ter o ambiente básico para rodar uma aplicação com Vue. Você pode encontrar essas informações [aqui](https://vuejs.org/).
+
+## Instalando 
+### Clonando o repositório
+```
+git clone https://github.com/GuilhermeDQueiroz/authentique
+
+cd authentique-main; cd authentique
+```
+
+### Rodando 
+```
+pip install requiriments.txt
+python rag.py
+uvicorn main:app --reload
+Necessário rodar o modelo via terminal antes.
+```
+
+PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
 
 1) Motivação
 A crescente demanda por atendimento ao cliente rápido e eficiente tem levado as empresas a
