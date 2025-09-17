@@ -6,6 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from database import colecao_mensagens
 import google.generativeai as genai
+from typing import List, Dict, Optional
 
 # === Configuração de ambiente ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -20,36 +21,166 @@ try:
 except Exception as e:
     print(f"[ERRO] Falha ao configurar a API do Gemini: {e}")
 
-
 # === Carregar modelo de embeddings ===
 print("[INFO] Carregando modelo de embeddings...")
 modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 print("[OK] Modelo de embeddings carregado.")
 print("[INFO] Utilizando a API do Gemini (Google AI)...")
 
+# === Classe para gerenciar contexto da conversa ===
+class GerenciadorContexto:
+    def __init__(self, max_historico: int = 10, max_tokens_contexto: int = 1500):
+        self.historico_conversa: List[Dict] = []
+        self.max_historico = max_historico
+        self.max_tokens_contexto = max_tokens_contexto
+        self.sessao_id = self.gerarSessaoId()
+        
+    def gerarSessaoId(self) -> str:
+        """Gera um ID único para a sessão de conversa"""
+        return f"sessao_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    def adicionarInteracao(self, pergunta: str, resposta: str, contexto_utilizado: List = None):
+        """Adiciona uma nova interação ao histórico"""
+        interacao = {
+            "pergunta": pergunta,
+            "resposta": resposta,
+            "contexto_utilizado": contexto_utilizado or [],
+            "timestamp": datetime.now(timezone.utc)
+        }
+        
+        self.historico_conversa.append(interacao)
+        
+        # Manter apenas as últimas N interações
+        if len(self.historico_conversa) > self.max_historico:
+            self.historico_conversa.pop(0)
+    
+    def obterContextoConversa(self) -> str:
+        """Obtém o contexto formatado da conversa atual"""
+        if not self.historico_conversa:
+            return ""
+        
+        contexto_texto = "HISTÓRICO DA CONVERSA ATUAL:\n"
+        for i, interacao in enumerate(self.historico_conversa[-5:], 1):  # Últimas 5 interações
+            contexto_texto += f"\n{i}. USUÁRIO: {interacao['pergunta']}\n"
+            contexto_texto += f"   ASSISTENTE: {interacao['resposta']}\n"
+        
+        # Limitar tamanho do contexto
+        if len(contexto_texto) > self.max_tokens_contexto:
+            contexto_texto = contexto_texto[-self.max_tokens_contexto:]
+        
+        return contexto_texto
+    
+    def verificarContinuidade(self, nova_pergunta: str) -> bool:
+        """Verifica se a pergunta atual é uma continuação da anterior"""
+        if not self.historico_conversa:
+            return False
+            
+        ultima_interacao = self.historico_conversa[-1]
+        ultima_pergunta = ultima_interacao['pergunta'].lower()
+        nova_pergunta_lower = nova_pergunta.lower()
+        
+        # Palavras-chave que indicam continuação
+        palavras_continuacao = [
+            'continue', 'continuar', 'mais', 'detalhe', 'detalhes', 'explique melhor',
+            'como assim', 'e depois', 'próximo', 'passo', 'então', 'e se', 'mas'
+        ]
+        
+        return any(palavra in nova_pergunta_lower for palavra in palavras_continuacao)
+    
+    def obterUltimaResposta(self) -> Optional[str]:
+        """Obtém a última resposta dada pelo assistente"""
+        if self.historico_conversa:
+            return self.historico_conversa[-1]['resposta']
+        return None
+    
+    def salvarSessao(self):
+        """Salva o histórico da sessão no banco de dados"""
+        try:
+            sessao_data = {
+                "tipo": "sessao_conversa",
+                "sessao_id": self.sessao_id,
+                "historico": self.historico_conversa,
+                "data_inicio": self.historico_conversa[0]['timestamp'] if self.historico_conversa else datetime.now(timezone.utc),
+                "data_fim": datetime.now(timezone.utc),
+                "total_interacoes": len(self.historico_conversa)
+            }
+            colecao_mensagens.insert_one(sessao_data)
+            print(f"[INFO] Sessão {self.sessao_id} salva com {len(self.historico_conversa)} interações.")
+        except Exception as e:
+            print(f"[ERRO] Falha ao salvar sessão: {e}")
+    
+    def carregarUltimaSessao(self, limite_horas: int = 24):
+        """Carrega a última sessão do usuário se foi recente"""
+        try:
+            tempo_limite = datetime.now(timezone.utc).timestamp() - (limite_horas * 3600)
+            
+            ultima_sessao = colecao_mensagens.find_one(
+                {
+                    "tipo": "sessao_conversa",
+                    "data_fim": {"$gte": datetime.fromtimestamp(tempo_limite, timezone.utc)}
+                },
+                sort=[("data_fim", -1)]
+            )
+            
+            if ultima_sessao and ultima_sessao.get("historico"):
+                self.historico_conversa = ultima_sessao["historico"]
+                self.sessao_id = ultima_sessao["sessao_id"]
+                print(f"[INFO] Sessão anterior carregada: {len(self.historico_conversa)} interações.")
+                return True
+            return False
+        except Exception as e:
+            print(f"[ERRO] Falha ao carregar sessão anterior: {e}")
+            return False
 
-# === Funções ===
+# Instância global do gerenciador de contexto
+contexto_manager = GerenciadorContexto()
 
-def gerarRespostaComIa(contexto_relevante, pergunta):
-    """Gera uma resposta usando a API do Gemini com base em um contexto."""
-    if not contexto_relevante:
-        return "Desculpe, não encontrei informações suficientes para responder à sua pergunta no momento."
+# === Funções modificadas ===
 
-    contexto = "\n".join(
-        f"Pergunta: {doc.get('pergunta', '')}\nResposta: {doc.get('resposta', '')}"
-        for doc in contexto_relevante
-    )
-
-    prompt = f"""
+def gerarRespostaComIa(contexto_relevante: List, pergunta: str, contexto_conversa: str = "") -> str:
+    """Gera uma resposta usando a API do Gemini com base em contexto e histórico da conversa."""
+    
+    # Contexto da base de conhecimento
+    contexto_base = ""
+    if contexto_relevante:
+        contexto_base = "\n".join(
+            f"P: {doc.get('pergunta', '')}\nR: {doc.get('resposta', '')}"
+            for doc in contexto_relevante
+        )
+    
+    # Verificar se é uma continuação
+    eh_continuacao = contexto_manager.verificarContinuidade(pergunta)
+    ultima_resposta = contexto_manager.obterUltimaResposta()
+    
+    # Construir prompt baseado no tipo de pergunta
+    if eh_continuacao and ultima_resposta:
+        prompt = f"""
 Você é um atendente especialista em sistema ERP.
-Com base no histórico abaixo, responda a próxima pergunta do usuário com clareza e objetividade.
+O usuário está pedindo continuação ou mais detalhes sobre a resposta anterior.
 
-Histórico de perguntas e respostas:
-{contexto}
+{contexto_conversa}
 
-Nova pergunta do usuário: {pergunta}
+ÚLTIMA RESPOSTA DADA:
+{ultima_resposta}
+
+NOVA PERGUNTA (continuação): {pergunta}
+
+Continue ou detalhe a resposta anterior conforme solicitado:
+"""
+    else:
+        prompt = f"""
+Você é um atendente especialista em sistema ERP.
+Use o histórico da conversa para manter contexto e coerência nas respostas.
+
+{contexto_conversa}
+
+CONHECIMENTO BASE RELEVANTE:
+{contexto_base}
+
+NOVA PERGUNTA: {pergunta}
 Resposta:
 """
+    
     try:
         # Seleciona o modelo do Gemini (gemini-1.5-flash é rápido e eficiente)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
@@ -72,9 +203,16 @@ Resposta:
         return "Erro ao gerar resposta com a IA do Gemini."
 
 
-def recuperarInfoRelevantes(pergunta: str):
+def recuperarInfoRelevantes(pergunta: str) -> List[Dict]:
+    """Recupera informações relevantes, considerando também o contexto da conversa"""
     try:
-        documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao"}}))
+        # Buscar na base de conhecimento
+        documentos = list(colecao_mensagens.find({"tipo": {"$ne": "interacao", "$ne": "sessao_conversa"}}))
+        
+        # Se for continuação, priorizar contexto da conversa
+        if contexto_manager.verificarContinuidade(pergunta):
+            return []  # Para continuações, não buscar nova base, usar apenas contexto da conversa
+            
     except Exception as e:
         print(f"[ERRO] Acesso ao banco falhou: {e}")
         return []
@@ -93,7 +231,6 @@ def recuperarInfoRelevantes(pergunta: str):
         if "embedding" in doc:
             doc_embedding = np.array(doc["embedding"]).reshape(1, -1)
         else:
-            # Gera e salva o embedding se não existir no documento
             doc_embedding_np = modelo_embedding.encode([pergunta_doc])[0]
             doc_embedding = doc_embedding_np.reshape(1, -1)
             try:
@@ -111,12 +248,18 @@ def recuperarInfoRelevantes(pergunta: str):
     return [doc for doc, sim in documentos_com_similaridade[:5] if sim > 0.6]
 
 
-def registrarInteracao(pergunta: str, resposta: str, contexto: list):
+def registrarInteracao(pergunta: str, resposta: str, contexto: List):
+    """Registra a interação no banco e no contexto da conversa"""
+    # Adicionar ao contexto da conversa
+    contexto_manager.adicionarInteracao(pergunta, resposta, contexto)
+    
+    # Registrar no banco como antes
     interacao = {
         "tipo": "interacao",
         "pergunta": pergunta,
         "resposta": resposta,
         "contexto_utilizado": [{"_id": doc["_id"], "pergunta": doc.get("pergunta")} for doc in contexto if isinstance(doc, dict)],
+        "sessao_id": contexto_manager.sessao_id,
         "data": datetime.now(timezone.utc)
     }
     try:
@@ -142,46 +285,78 @@ def treinarNovaPergunta(pergunta: str, resposta: str):
     except Exception as e:
         print(f"[ERRO] Falha ao treinar nova pergunta: {e}")
 
+
 # === Execução via terminal para testes ===
 if __name__ == "__main__":
-    print("\n[ASSISTENTE ERP - Tek-System IA com Gemini]")
+    print("\n[ASSISTENTE ERP - Tek-System IA com Gemini e Contexto Conversacional]")
     print("Pergunte sobre rotinas fiscais, NFe, SPED, SEFAZ.")
-    print("Digite 'sair' para encerrar, ou 'aprender' para ensinar algo novo.\n")
+    print("Digite 'sair' para encerrar, 'aprender' para ensinar algo novo,")
+    print("'historico' para ver histórico da conversa, ou 'nova_sessao' para começar nova conversa.\n")
+    
+    # Tentar carregar sessão anterior
+    if contexto_manager.carregarUltimaSessao():
+        print("[INFO] Conversa anterior carregada. Posso continuar de onde paramos.")
+        print("Digite 'historico' para ver o que já conversamos.\n")
 
     while True:
         try:
             pergunta = input("Pergunta: ").strip()
             if not pergunta:
                 continue
+                
             if pergunta.lower() == "sair":
-                print("Encerrando assistente.")
+                contexto_manager.salvarSessao()
+                print("Encerrando assistente. Conversa salva.")
                 break
+                
+            if pergunta.lower() == "historico":
+                print("\n" + "="*50)
+                print(contexto_manager.obterContextoConversa())
+                print("="*50 + "\n")
+                continue
+                
+            if pergunta.lower() == "nova_sessao":
+                contexto_manager.salvarSessao()
+                contexto_manager = GerenciadorContexto()
+                print("[INFO] Nova sessão iniciada.\n")
+                continue
+                
             if pergunta.lower().startswith("aprender"):
                 nova_pergunta = input("Nova pergunta: ").strip()
                 nova_resposta = input("Resposta correta: ").strip()
                 treinarNovaPergunta(nova_pergunta, nova_resposta)
                 continue
 
+            # Obter contexto da conversa atual
+            contexto_conversa = contexto_manager.obterContextoConversa()
+            
+            # Recuperar documentos relevantes
             documentos_relevantes = recuperarInfoRelevantes(pergunta)
 
-            # Otimização: Se a pergunta for muito similar a uma já existente, usa a resposta direta
-            if documentos_relevantes:
+            # Verificar se é resposta direta de alta similaridade
+            if documentos_relevantes and not contexto_manager.verificarContinuidade(pergunta):
                 pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
                 doc_top = documentos_relevantes[0]
                 doc_embedding = modelo_embedding.encode([doc_top.get("pergunta", "")]).reshape(1, -1)
                 similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
+                
                 if similaridade > 0.9:
                     resposta = doc_top.get("resposta", "")
                     print(f"\n[RESPOSTA (base)]: {resposta}\n")
                     registrarInteracao(pergunta, resposta, [doc_top])
                     continue
 
-            resposta = gerarRespostaComIa(documentos_relevantes, pergunta)
+            # Gerar resposta com IA usando contexto
+            resposta = gerarRespostaComIa(documentos_relevantes, pergunta, contexto_conversa)
             registrarInteracao(pergunta, resposta, documentos_relevantes)
-            print(f"\n[RESPOSTA (IA)]: {resposta}\n")
+            
+            # Identificar tipo de resposta
+            tipo_resposta = "[CONTINUAÇÃO]" if contexto_manager.verificarContinuidade(pergunta) else "[RESPOSTA (IA)]"
+            print(f"\n{tipo_resposta}: {resposta}\n")
 
         except KeyboardInterrupt:
-            print("\nEncerrando assistente.")
+            contexto_manager.salvarSessao()
+            print("\nEncerrando assistente. Conversa salva.")
             break
         except Exception as e:
             print(f"[ERRO]: {e}")
