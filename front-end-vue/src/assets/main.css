@@ -1,0 +1,72 @@
+@import './base.css';
+
+.logo-img {
+  width: 40%;
+  --margin-bottom: 1.5rem;
+  --display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+body {
+  background: white;
+  color: #0f172a;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-family: "Rubik", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  font-feature-settings: "liga", "kern";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.input-group label {
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.input-group input {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background-color: #f1f5f9;
+  color: #334155;
+  border: 1px solid #334155;
+  outline: none;
+  font-size: 1rem;
+  font-family: "Rubik", sans-serif;
+}
+
+.input-group input:focus {
+  border-color: #2196f3;
+}
+
+/* Tema claro */
+body.claro {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* Tema escuro */
+body.escuro {
+  background-color: #242424;
+  color: #f1f1f1;
+}
+
+/* Botão de alternância */
+#botao-tema {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  padding: 6px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
