@@ -10,7 +10,7 @@ Automatizar o atendimento ao cliente: Reduzir a carga de trabalho dos atendentes
 - css
 - javascript
 - Python
-- Llama 3 7B
+- Gemini
 
 ## 📌 PROJETO INTEGRADOR V: CHATBOT INTELIGENTE PARA ATENDIMENTO AO CLIENTE - CIÊNCIA DA COMPUTAÇÃO - UNIFAGOC
 
