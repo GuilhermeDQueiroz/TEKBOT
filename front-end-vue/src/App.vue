@@ -1,16 +1,15 @@
 <template>
+
   <head>
     <title>TekBot</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
-    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   </head>
   <main>
+
     <label class="switch">
-      <input type="checkbox" id="botao-tema" @change="alternarTema" />
+      <input type="checkbox" value="{{ appStore.temaClaro }}" id="botao-tema" />
       <span class="slider">
         <i class="fas fa-sun icone sol"></i>
         <i class="fas fa-moon icone lua"></i>
@@ -21,13 +20,13 @@
 </template>
 
 <script setup>
-import Login from "./components/Login.vue";
-import Chat from "./components/Chat.vue";
 import { onMounted } from "vue";
+import { useAppStore } from "./stores/app";
 
-let checkbox;
+const appStore = useAppStore();
+
 onMounted(() => {
-  checkbox = document.getElementById("botao-tema");
+  let checkbox = document.getElementById("botao-tema");
   aplicarTemaSalvo();
 
   if (checkbox) {
@@ -38,9 +37,7 @@ function aplicarTemaSalvo() {
   const temaSalvo = localStorage.getItem("tema") || "claro";
   document.body.classList.add(temaSalvo);
 
-  if (checkbox) {
-    checkbox.checked = temaSalvo === "escuro";
-  }
+
 
   trocarImagemTema(temaSalvo); // ← atualiza imagem no carregamento
 }
@@ -48,7 +45,7 @@ function aplicarTemaSalvo() {
 function alternarTema() {
   const body = document.body;
 
-  if (checkbox.checked) {
+  if (!appStore.temaClaro) {
     body.classList.remove("claro");
     body.classList.add("escuro");
     localStorage.setItem("tema", "escuro");
@@ -59,6 +56,7 @@ function alternarTema() {
     localStorage.setItem("tema", "claro");
     trocarImagemTema("claro"); // ← atualiza imagem ao trocar
   }
+  appStore.trocarTema();
 }
 
 function trocarImagemTema(tema) {
@@ -73,8 +71,8 @@ function trocarImagemTema(tema) {
 }
 </script>
 <style scope>
-@import url("https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap");
-
+/*@import url("https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap");
+*/
 /*
 
 
@@ -188,12 +186,14 @@ body.redefinir-body {
 
  */
 @keyframes bounce {
+
   0%,
   80%,
   100% {
     transform: scale(0.8);
     opacity: 0.6;
   }
+
   40% {
     transform: scale(1.2);
     opacity: 1;

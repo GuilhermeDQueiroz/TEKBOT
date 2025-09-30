@@ -15,11 +15,14 @@ import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 
+import { createPinia } from 'pinia'
+
 const vuetify = createVuetify({
   components,
   directives,
 })
 
+const pinia = createPinia()
 
 library.add(faSignOutAlt)
 
@@ -30,5 +33,6 @@ app.component('font-awesome-icon', FontAwesomeIcon)
 
 app.use(router)
 app.use(vuetify)
+app.use(pinia)
 
 app.mount('#app')
