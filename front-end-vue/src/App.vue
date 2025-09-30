@@ -1,16 +1,43 @@
+<template>
+  <head>
+    <title>TekBot</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+    />
+  </head>
+  <main>
+    <label class="switch">
+      <input type="checkbox" id="botao-tema" @change="alternarTema" />
+      <span class="slider">
+        <i class="fas fa-sun icone sol"></i>
+        <i class="fas fa-moon icone lua"></i>
+      </span>
+    </label>
+    <router-view />
+  </main>
+</template>
+
 <script setup>
 import Login from "./components/Login.vue";
 import Chat from "./components/Chat.vue";
-import { ref } from "vue";
+import { onMounted } from "vue";
 
-const botaoTema = ref(null);
-const checkbox = botaoTema.value;
+let checkbox;
+onMounted(() => {
+  checkbox = document.getElementById("botao-tema");
+  aplicarTemaSalvo();
 
+  if (checkbox) {
+    checkbox.addEventListener("change", alternarTema);
+  }
+});
 function aplicarTemaSalvo() {
   const temaSalvo = localStorage.getItem("tema") || "claro";
   document.body.classList.add(temaSalvo);
 
-  
   if (checkbox) {
     checkbox.checked = temaSalvo === "escuro";
   }
@@ -44,38 +71,7 @@ function trocarImagemTema(tema) {
     logo.src = "/src/assets/claro.png"; // substitua pelo nome real da imagem clara
   }
 }
-
-document.addEventListener("DOMContentLoaded", () => {
-  aplicarTemaSalvo();
-
-  if (checkbox) {
-    checkbox.addEventListener("change", alternarTema);
-  }
-});
 </script>
-
-<template>
-  <head>
-    <title>TekBot</title>
-    <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
-    />
-  </head>
-  <main>
-    <label class="switch">
-      <input type="checkbox" id="botao-tema" ref="botaoTema" @change="alternarTema" />
-      <span class="slider">
-        <i class="fas fa-sun icone sol"></i>
-        <i class="fas fa-moon icone lua"></i>
-      </span>
-    </label>
-    <router-view />
-  </main>
-</template>
-
 <style scope>
 @import url("https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap");
 
