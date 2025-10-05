@@ -1,28 +1,55 @@
 <template>
-  <div class="chat-container">
-    <header class="chat-header">
-      <span class="chat-title">TekBot</span>
-      <button class="logout-button" @click="voltarParaLogin()">
-        <font-awesome-icon icon="sign-out-alt" /> Sair
-      </button>
-    </header>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside :class="['sidebar', { collapsed: !sidebarAberta }]">
+      <div class="sidebar-header">
+        <button class="new-chat-button" @click="novaConversa" v-show="sidebarAberta">+</button>
+        <button class="sidebar-toggle" @click="toggleSidebar">
+          <span>☰</span>
+        </button>
+      </div>
+      <div class="sidebar-content" v-show="sidebarAberta">
+        <h3 class="sidebar-title">Conversas</h3>
+        <div class="conversations-list">
+          <div 
+            v-for="conversa in conversas" 
+            :key="conversa.id"
+            :class="['conversation-item', { active: conversa.id === conversaAtiva }]"
+            @click="selecionarConversa(conversa.id)"
+          >
+            <span class="conversation-title">{{ conversa.titulo }}</span>
+            <span class="conversation-date">{{ conversa.data }}</span>
+          </div>
+        </div>
+      </div>
+    </aside>
 
-    <main id="chat" ref="chat" class="chat-main">
-      <!-- Mensagens vão aqui -->
-    </main>
+    <!-- Chat Container -->
+    <div class="chat-container">
+      <header class="chat-header">
+        <span class="chat-title">TekBot</span>
+        <button class="logout-button" @click="voltarParaLogin()">
+          <font-awesome-icon icon="sign-out-alt" /> Sair
+        </button>
+      </header>
 
-    <form id="chat-form" class="chat-form" @submit.prevent="submitForm">
-      <input
-        id="user-input"
-        type="text"
-        placeholder="Digite sua mensagem..."
-        class="chat-input"
-        autocomplete="off"
-        required
-        v-model="formData.msg"
-      />
-      <button type="submit" class="chat-button">Enviar</button>
-    </form>
+      <main id="chat" ref="chat" class="chat-main">
+        <!-- Mensagens vão aqui -->
+      </main>
+
+      <form id="chat-form" class="chat-form" @submit.prevent="submitForm">
+        <input
+          id="user-input"
+          type="text"
+          placeholder="Digite sua mensagem..."
+          class="chat-input"
+          autocomplete="off"
+          required
+          v-model="formData.msg"
+        />
+        <button type="submit" class="chat-button">Enviar</button>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -37,19 +64,170 @@ const formData = reactive({
   msg: "",
 });
 
+// Estado da sidebar
+const sidebarAberta = ref(true);
+
+// Função para alternar sidebar
+function toggleSidebar() {
+  sidebarAberta.value = !sidebarAberta.value;
+}
+
+// Sistema de gerenciamento de conversas
+const conversas = ref([]);
+const conversaAtiva = ref(null);
+const proximoId = ref(1);
+
+// Armazena as mensagens de cada conversa
+const mensagensPorConversa = ref({});
+
 onMounted(() => {
-  appendMessage(
-    "Olá! Eu sou o <strong>TekBot</strong> e estou aqui para te ajudar!",
-    "left"
-  );
+  // Carrega conversas do localStorage
+  carregarConversas();
+  
+  // Se não houver conversas, cria uma nova
+  if (conversas.value.length === 0) {
+    criarNovaConversa();
+  } else {
+    // Carrega a última conversa ativa
+    selecionarConversa(conversas.value[0].id);
+  }
 });
+
+function carregarConversas() {
+  const conversasSalvas = localStorage.getItem('tekbot_conversas');
+  const mensagensSalvas = localStorage.getItem('tekbot_mensagens');
+  const proximoIdSalvo = localStorage.getItem('tekbot_proximo_id');
+  
+  if (conversasSalvas) {
+    conversas.value = JSON.parse(conversasSalvas);
+  }
+  
+  if (mensagensSalvas) {
+    mensagensPorConversa.value = JSON.parse(mensagensSalvas);
+  }
+  
+  if (proximoIdSalvo) {
+    proximoId.value = parseInt(proximoIdSalvo);
+  }
+}
+
+function salvarConversas() {
+  localStorage.setItem('tekbot_conversas', JSON.stringify(conversas.value));
+  localStorage.setItem('tekbot_mensagens', JSON.stringify(mensagensPorConversa.value));
+  localStorage.setItem('tekbot_proximo_id', proximoId.value.toString());
+}
+
+function criarNovaConversa() {
+  const novaConversa = {
+    id: proximoId.value++,
+    titulo: `Nova Conversa ${conversas.value.length + 1}`,
+    data: obterDataFormatada(),
+  };
+  
+  conversas.value.unshift(novaConversa);
+  mensagensPorConversa.value[novaConversa.id] = [];
+  
+  salvarConversas();
+  selecionarConversa(novaConversa.id);
+}
+
+function novaConversa() {
+  // Salva o chat atual antes de criar um novo
+  salvarChatAtual();
+  criarNovaConversa();
+}
+
+function selecionarConversa(id) {
+  // Salva o chat atual antes de trocar
+  if (conversaAtiva.value !== null) {
+    salvarChatAtual();
+  }
+  
+  conversaAtiva.value = id;
+  carregarMensagensConversa(id);
+}
+
+function salvarChatAtual() {
+  if (conversaAtiva.value === null || !chat.value) return;
+  
+  // Extrai todas as mensagens do DOM
+  const mensagens = [];
+  const messageWrappers = chat.value.querySelectorAll('.message-wrapper');
+  
+  messageWrappers.forEach(wrapper => {
+    const bubble = wrapper.querySelector('.message-bubble');
+    if (bubble && !bubble.classList.contains('typing-bubble')) {
+      const side = wrapper.classList.contains('left') ? 'left' : 'right';
+      mensagens.push({
+        content: bubble.innerHTML,
+        side: side
+      });
+    }
+  });
+  
+  mensagensPorConversa.value[conversaAtiva.value] = mensagens;
+  
+  // Atualiza o título da conversa com base na primeira mensagem do usuário
+  if (mensagens.length > 0) {
+    const primeiraMensagemUsuario = mensagens.find(m => m.side === 'right');
+    if (primeiraMensagemUsuario) {
+      const conversa = conversas.value.find(c => c.id === conversaAtiva.value);
+      if (conversa) {
+        const textoLimpo = primeiraMensagemUsuario.content.replace(/<[^>]*>/g, '');
+        conversa.titulo = textoLimpo.substring(0, 30) + (textoLimpo.length > 30 ? '...' : '');
+      }
+    }
+  }
+  
+  salvarConversas();
+}
+
+function carregarMensagensConversa(id) {
+  // Limpa o chat
+  if (chat.value) {
+    chat.value.innerHTML = '';
+  }
+  
+  // Carrega as mensagens salvas
+  const mensagens = mensagensPorConversa.value[id] || [];
+  
+  if (mensagens.length === 0) {
+    // Mensagem de boas-vindas para novo chat
+    appendMessage(
+      "Olá! Eu sou o <strong>TekBot</strong> e estou aqui para te ajudar!",
+      "left"
+    );
+  } else {
+    // Restaura as mensagens salvas
+    mensagens.forEach(msg => {
+      appendMessage(msg.content, msg.side);
+    });
+  }
+}
+
+function obterDataFormatada() {
+  const agora = new Date();
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  
+  const ontem = new Date(hoje);
+  ontem.setDate(ontem.getDate() - 1);
+  
+  if (agora >= hoje) {
+    return 'Hoje';
+  } else if (agora >= ontem) {
+    return 'Ontem';
+  } else {
+    return agora.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  }
+}
 
 const submitForm = async () => {
   const msg = formData.msg;
   if (!msg) return;
 
   appendMessage(msg, "right");
-  input.value = "";
+  formData.msg = "";
 
   // Mostra animação de "Digitando..."
   const digitando = appendTypingMessage();
@@ -64,6 +242,9 @@ const submitForm = async () => {
     // Converte \n em <br>
     const respostaFormatada = data.resposta.replace(/\\n|\\r\\n|\\\\n|\n/g, "<br>");
     appendMessage(respostaFormatada, "left");
+    
+    // Salva automaticamente após cada troca de mensagens
+    salvarChatAtual();
   } catch (error) {
     console.error("Erro ao chamar a IA:", error);
     chat.value.removeChild(digitando);
@@ -128,22 +309,169 @@ function appendTypingMessage() {
 }
 
 function voltarParaLogin() {
+  // Salva o chat atual antes de sair
+  salvarChatAtual();
   localStorage.removeItem("userToken");
   router.replace("/");
 }
 </script>
 
 <style scope>
-.chat-container {
-  width: 80%;
-  height: 80%;
-  background-color: white;
-  border-radius: 1rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+/* Container principal que ocupa toda a tela */
+.app-container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 280px;
+  background-color: black;
+  border-right: 1px solid #334155;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #334155;
+  transition: width 0.3s ease, background-color 0.3s ease;
+  position: relative;
+  z-index: 1000;
+}
+
+.sidebar.collapsed {
+  width: 60px;
+  background-color: #1e293b;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background-color: black;
+  gap: 0.5rem;
+  transition: background-color 0.3s ease;
+}
+
+.sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding: 0.75rem 0.5rem;
+  background-color: #1e293b;
+}
+
+.new-chat-button {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.3rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s;
+  flex-shrink: 0;
+}
+
+.new-chat-button:hover {
+  background-color: #1976d2;
+}
+
+.sidebar-toggle {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.3rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s, transform 0.2s;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background-color: #1976d2;
+  transform: scale(1.05);
+}
+
+.sidebar-toggle:active {
+  transform: scale(0.95);
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar-title {
+  color: white;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background-color: black;
+}
+
+.conversations-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0.5rem;
+}
+
+.conversation-item {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.25rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.conversation-item:hover {
+  background-color: #334155;
+}
+
+.conversation-item.active {
+  background-color: #1e293b;
+}
+
+.conversation-title {
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-date {
+  color: #9ca3af;
+  font-size: 0.75rem;
+}
+
+.conversation-item.active .conversation-date {
+  color: #e0f2fe;
+}
+
+/* Chat Container - agora ocupa o espaço restante */
+.chat-container {
+  flex: 1;
+  background-color: white;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -155,8 +483,8 @@ function voltarParaLogin() {
   padding: 1rem;
   font-size: 1.5rem;
   font-weight: bold;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
+  border-bottom: 1px solid #334155;
+  position: relative;
 }
 
 .chat-title {
@@ -176,6 +504,8 @@ function voltarParaLogin() {
   align-items: center;
   gap: 0.4rem;
   transition: background-color 0.3s, color 0.3s;
+  position: relative;
+  left: -5%; /* desloca horizontalmente sem afetar alinhamento vertical */
 }
 
 .logout-button:hover {
@@ -238,7 +568,7 @@ function voltarParaLogin() {
 }
 
 .chat-button:hover {
-  background-color: #4caf50;
+  background-color: #1976d2;
 }
 
 ::-webkit-scrollbar {
@@ -438,8 +768,8 @@ input:checked + .slider .lua {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box; /* faz com que width/height incluam o padding */
-  padding: 0; /* garante que nada seja somado */
+  box-sizing: border-box;
+  padding: 0;
 }
 
 .typing-indicator {
