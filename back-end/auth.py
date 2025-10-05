@@ -1,33 +1,48 @@
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from typing import Optional
-import os
 from dotenv import load_dotenv
+from passlib.context import CryptContext
 
-# Carregar as variáveis de ambiente
 load_dotenv()
 
-# Usando variáveis de ambiente ou valores padrão
-CHAVE_SECRETA = os.getenv("SECRET_KEY", "default_secret_key_for_testing")  # Chave de segurança
-ALGORITMO = os.getenv("ALGORITHM", "HS256")
-TEMPO_EXPIRACAO_TOKEN_MINUTOS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+if not SECRET_KEY:
+    raise ValueError("Nenhuma SECRET_KEY definida no arquivo .env. O servidor não pode iniciar.")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+# ===============================================
+# ==         FUNÇÕES PARA LIDAR COM SENHAS     ==
+# ===============================================
+
+def verificar_senha(senha_plana: str, senha_hash: str) -> bool:
+    """Verifica se uma senha plana corresponde a um hash existente."""
+    return pwd_context.verify(senha_plana, senha_hash)
+
+def criar_hash_senha(senha: str) -> str:
+    """Cria um hash seguro para uma nova senha."""
+    return pwd_context.hash(senha)
+
+
+# ===============================================
+# ==         FUNÇÃO PARA CRIAR TOKENS JWT      ==
+# ===============================================
 
 def create_access_token(dados: dict, tempo_expiracao: Optional[timedelta] = None):
-    # Copiar dados para não modificar o original
-    dados_para_codificar = dados.copy()
+    para_encodar = dados.copy()
     
-    # Definir tempo de expiração
     if tempo_expiracao:
-        expirar = datetime.utcnow() + tempo_expiracao
+        expirar = datetime.now(timezone.utc) + tempo_expiracao
     else:
-        expirar = datetime.utcnow() + timedelta(minutes=TEMPO_EXPIRACAO_TOKEN_MINUTOS)
+        expirar = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    # Incluir a data de expiração no token
-    dados_para_codificar.update({"exp": expirar})
+    para_encodar.update({"exp": expirar})
     
-    # Codificar o token com a chave secreta
-    try:
-        token_codificado = jwt.encode(dados_para_codificar, CHAVE_SECRETA, algorithm=ALGORITMO)
-        return token_codificado
-    except JWTError as e:
-        raise HTTPException(status_code=500, detail="Erro ao gerar o token")
+    token_codificado = jwt.encode(para_encodar, SECRET_KEY, algorithm=ALGORITHM)
+    return token_codificado
