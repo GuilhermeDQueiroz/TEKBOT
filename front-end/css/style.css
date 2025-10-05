@@ -598,5 +598,344 @@ body.redefinir-body {
   }
 }
 
+body.chat-layout {
+    display: block; /* Anula o 'display: flex' do body original */
+    align-items: initial;
+    justify-content: initial;
+}
+
+/* 2. LAYOUT PRINCIPAL DO CHAT (SIDEBAR + CONTAINER) */
+.main-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+}
+
+/* 3. ESTILOS DA NOVA SIDEBAR */
+.sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    background-color: #202123;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    box-sizing: border-box;
+    transition: background-color 0.3s;
+}
+
+.sidebar-button {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    padding: 10px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    border-radius: 5px;
+    text-align: left;
+    font-size: 0.9rem;
+    font-family: 'Rubik', sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color 0.3s;
+}
+
+.sessoes-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.sessao-item {
+    padding: 12px 10px;
+    cursor: pointer;
+    border-radius: 5px;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background-color 0.3s;
+}
+
+.sessao-item:hover {
+    background-color: #343541;
+}
+
+.sessao-item.ativa {
+    background-color: #40414f;
+    font-weight: bold;
+}
+
+.sidebar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 10px;
+    border-top: 1px solid #343541;
+}
 
 
+/* 4. AJUSTES EM ESTILOS EXISTENTES PARA O NOVO LAYOUT */
+
+/* Ajusta o .chat-container para ocupar o espaço restante */
+.main-container .chat-container {
+    flex-grow: 1;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+}
+
+/* Ajusta o botão de logout na sidebar */
+.sidebar .logout-button {
+    background-color: transparent;
+    font-size: 0.9rem;
+}
+.sidebar .logout-button:hover {
+    background-color: #343541;
+}
+
+/* Ajusta o botão de tema na sidebar */
+.sidebar .switch {
+    position: relative;
+    top: auto;
+    right: auto;
+    z-index: 1;
+}
+
+/* Estilos para os itens de sessão com botão de deletar */
+.sessao-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.sessao-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sessao-item.ativa {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.sessao-titulo {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sessao-deletar {
+    background: none;
+    border: none;
+    color: #ff4444;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.2s, background-color 0.2s;
+    font-size: 14px;
+}
+
+.sessao-item:hover .sessao-deletar {
+    opacity: 1;
+}
+
+.sessao-deletar:hover {
+    background-color: rgba(255, 68, 68, 0.2);
+}
+
+/* Botão toggle sidebar */
+.toggle-sidebar-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 10px 15px;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+}
+
+.toggle-sidebar-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.chat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Animação sidebar */
+.sidebar {
+    transition: transform 0.3s ease-in-out;
+    min-width: 280px;
+    max-width: 280px;
+}
+
+.sidebar.fechada {
+    transform: translateX(-280px);
+    min-width: 0;
+    max-width: 0;
+    overflow: hidden;
+}
+
+.main-container {
+    display: flex;
+    overflow: hidden;
+}
+
+.chat-container {
+    flex: 1;
+    min-width: 0;
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 1000;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .sidebar.fechada {
+        transform: translateX(-100%);
+    }
+}
+
+/* Modal de confirmação */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: fade-in 0.2s ease-out;
+}
+
+.modal-container {
+    background-color: white;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    animation: slide-up 0.3s ease-out;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.modal-icon {
+    width: 48px;
+    height: 48px;
+    background-color: #fee;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #c33;
+    font-size: 24px;
+}
+
+.modal-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0;
+}
+
+.modal-body {
+    color: #64748b;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-bottom: 24px;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.modal-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Rubik', sans-serif;
+}
+
+.modal-btn-cancel {
+    background-color: #f1f5f9;
+    color: #64748b;
+}
+
+.modal-btn-cancel:hover {
+    background-color: #e2e8f0;
+}
+
+.modal-btn-confirm {
+    background-color: #ef4444;
+    color: white;
+}
+
+.modal-btn-confirm:hover {
+    background-color: #dc2626;
+}
+
+@keyframes slide-up {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Tema escuro para o modal */
+body.escuro .modal-container {
+    background-color: #1e293b;
+}
+
+body.escuro .modal-title {
+    color: white;
+}
+
+body.escuro .modal-body {
+    color: #94a3b8;
+}
+
+body.escuro .modal-btn-cancel {
+    background-color: #334155;
+    color: #e2e8f0;
+}
+
+body.escuro .modal-btn-cancel:hover {
+    background-color: #475569;
+}
