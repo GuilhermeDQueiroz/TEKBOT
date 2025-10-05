@@ -1,16 +1,21 @@
 <script setup>
 import Login from "./components/Login.vue";
 import Chat from "./components/Chat.vue";
-import { ref } from "vue";
+import { onMounted } from "vue";
 
-const botaoTema = ref(null);
-const checkbox = botaoTema.value;
+let checkbox;
+onMounted(() => {
+  checkbox = document.getElementById("botao-tema");
+  aplicarTemaSalvo();
 
+  if (checkbox) {
+    checkbox.addEventListener("change", alternarTema);
+  }
+});
 function aplicarTemaSalvo() {
   const temaSalvo = localStorage.getItem("tema") || "claro";
   document.body.classList.add(temaSalvo);
 
-  
   if (checkbox) {
     checkbox.checked = temaSalvo === "escuro";
   }
@@ -44,14 +49,6 @@ function trocarImagemTema(tema) {
     logo.src = "/src/assets/claro.png"; // substitua pelo nome real da imagem clara
   }
 }
-
-document.addEventListener("DOMContentLoaded", () => {
-  aplicarTemaSalvo();
-
-  if (checkbox) {
-    checkbox.addEventListener("change", alternarTema);
-  }
-});
 </script>
 
 <template>

@@ -1,11 +1,5 @@
 <template>
-  <label class="switch">
-    <input type="checkbox" id="botao-tema" />
-    <span class="slider">
-      <i class="fas fa-sun icone sol"></i>
-      <i class="fas fa-moon icone lua"></i>
-    </span>
-  </label>
+  
 
   <div class="login-container" id="login-container" ref="loginContainer">
     <h2 class="login-header">Cadastro</h2>
