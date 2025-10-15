@@ -12,3 +12,4 @@ colecao_mensagens = banco_de_dados["mensagem"]
 
 colecao_sessoes = banco_de_dados["sessoes"]
 colecao_interacoes = banco_de_dados["interacoes"]
+colecao_tickets = banco_de_dados["tickets"]
