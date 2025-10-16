@@ -3,11 +3,16 @@ import torch
 import json
 import numpy as np
 import time
+import pickle
 from datetime import datetime, timezone
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 from sentence_transformers import SentenceTransformer
 from typing import Dict, List, Optional
-from database import colecao_mensagens, colecao_interacoes, colecao_tickets
+from collections import Counter
+from database import colecao_mensagens, colecao_interacoes, colecao_tickets, colecao_feedback_ia
 import google.generativeai as genai
 
 # === Configuração de ambiente ===
@@ -26,6 +31,12 @@ except Exception as e:
 print("[INFO] Carregando modelo de embeddings...")
 modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 print("[OK] Modelo de embeddings carregado.")
+
+# === Diretório para modelos ML ===
+MODELO_DIR = "./modelos_ia"
+os.makedirs(MODELO_DIR, exist_ok=True)
+MODELO_PATH = os.path.join(MODELO_DIR, "modelo_prioridade.pkl")
+VECTORIZER_PATH = os.path.join(MODELO_DIR, "vectorizer.pkl")
 
 
 # ==========================
@@ -80,7 +91,7 @@ def obterUltimaResposta(sessao_id: str) -> Optional[str]:
 
 
 # ==========================
-# BUSCA RELEVANTE (mensagens + interações)
+# BUSCA RELEVANTE
 # ==========================
 def recuperarInfoRelevantes(pergunta: str, sessao_id: Optional[str] = None) -> List[Dict]:
     """Recupera documentos relevantes da base de conhecimento e interações anteriores"""
@@ -262,15 +273,382 @@ def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
 
 
 # ================================================================
-# SISTEMA HÍBRIDO DE PRIORIZAÇÃO DE TICKETS (REGRAS + CACHE + IA)
+# SISTEMA DE MACHINE LEARNING (APRENDIZADO)
+# ================================================================
+
+class ModeloAprendizado:
+    """
+    Sistema de ML que aprende com tickets classificados e correções
+    """
+    
+    def __init__(self):
+        self.modelo = None
+        self.vectorizer = None
+        self.prioridades_map = {
+            'baixa': 0,
+            'media': 1,
+            'alta': 2,
+            'critica': 3
+        }
+        self.prioridades_reverse = {v: k for k, v in self.prioridades_map.items()}
+        self.carregado = False
+        self.metadados = None
+        
+    def carregar_modelo(self) -> bool:
+        """Carrega modelo já treinado"""
+        try:
+            if os.path.exists(MODELO_PATH) and os.path.exists(VECTORIZER_PATH):
+                with open(MODELO_PATH, 'rb') as f:
+                    self.modelo = pickle.load(f)
+                with open(VECTORIZER_PATH, 'rb') as f:
+                    self.vectorizer = pickle.load(f)
+                
+                # Carregar metadados
+                metadados_path = os.path.join(MODELO_DIR, 'metadados.pkl')
+                if os.path.exists(metadados_path):
+                    with open(metadados_path, 'rb') as f:
+                        self.metadados = pickle.load(f)
+                
+                self.carregado = True
+                print("[ML] ✅ Modelo carregado!")
+                return True
+            else:
+                print("[ML] ⚠️ Nenhum modelo encontrado. Execute: python retreinar_modelo.py")
+                return False
+        except Exception as e:
+            print(f"[ML] ❌ Falha ao carregar: {e}")
+            return False
+    
+    def preparar_dados_treino(self) -> tuple:
+        """Busca tickets do banco para treinar"""
+        print("[ML] 📊 Buscando dados de treino...")
+        
+        # 1. Tickets CORRIGIDOS (fonte mais confiável)
+        tickets_corrigidos = list(colecao_tickets.find({
+            "foi_corrigido": True,
+            "prioridade_corrigida_atendente": {"$exists": True}
+        }))
+        
+        # 2. Tickets RESOLVIDOS (sem correção = IA acertou)
+        tickets_resolvidos = list(colecao_tickets.find({
+            "status": {"$in": ["resolvido", "fechado"]},
+            "foi_corrigido": {"$ne": True},
+            "prioridade": {"$exists": True}
+        }).limit(500))
+        
+        print(f"[ML]    Corrigidos: {len(tickets_corrigidos)}")
+        print(f"[ML]    Resolvidos: {len(tickets_resolvidos)}")
+        
+        total = len(tickets_corrigidos) + len(tickets_resolvidos)
+        
+        if total < 20:
+            print(f"[ML] ⚠️ Mínimo 20 tickets necessários (atual: {total})")
+            return None, None, None
+        
+        textos = []
+        categorias = []
+        prioridades = []
+        
+        # Priorizar correções
+        for ticket in tickets_corrigidos:
+            texto = f"{ticket['titulo']} {ticket['descricao']}"
+            textos.append(texto)
+            categorias.append(ticket.get('categoria', 'outro'))
+            prioridades.append(ticket['prioridade_corrigida_atendente'])
+        
+        for ticket in tickets_resolvidos:
+            texto = f"{ticket['titulo']} {ticket['descricao']}"
+            textos.append(texto)
+            categorias.append(ticket.get('categoria', 'outro'))
+            prioridades.append(ticket['prioridade'])
+        
+        # Distribuição
+        dist = Counter(prioridades)
+        print(f"[ML] 📈 Distribuição:")
+        for prio in ['baixa', 'media', 'alta', 'critica']:
+            count = dist.get(prio, 0)
+            print(f"       {prio}: {count}")
+        
+        return textos, categorias, prioridades
+    
+    def treinar(self, force=False):
+        """Treina o modelo"""
+        print("\n" + "="*70)
+        print("🧠 TREINANDO MODELO DE MACHINE LEARNING")
+        print("="*70)
+        
+        if not force and os.path.exists(MODELO_PATH):
+            print("\n⚠️  Modelo já existe.")
+            return False
+        
+        textos, categorias, prioridades = self.preparar_dados_treino()
+        
+        if textos is None:
+            return False
+        
+        # Converter para números
+        y = np.array([self.prioridades_map[p] for p in prioridades])
+        
+        # Features
+        print("\n[ML] 🔧 Criando features...")
+        
+        self.vectorizer = TfidfVectorizer(
+            max_features=500,
+            ngram_range=(1, 2),
+            min_df=2
+        )
+        
+        X_texto = self.vectorizer.fit_transform(textos)
+        
+        # One-hot para categoria
+        categorias_unicas = list(set(categorias))
+        X_cat = np.zeros((len(categorias), len(categorias_unicas)))
+        for i, cat in enumerate(categorias):
+            if cat in categorias_unicas:
+                X_cat[i, categorias_unicas.index(cat)] = 1
+        
+        X = np.hstack([X_texto.toarray(), X_cat])
+        
+        print(f"[ML]    Shape: {X.shape}")
+        
+        # Treino/teste
+        if len(textos) >= 40:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+        else:
+            X_train, y_train = X, y
+            X_test, y_test = X, y
+        
+        # Treinar
+        print("\n[ML] 🎯 Treinando Random Forest...")
+        
+        self.modelo = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42,
+            class_weight='balanced'
+        )
+        
+        self.modelo.fit(X_train, y_train)
+        
+        # Avaliar
+        score_treino = self.modelo.score(X_train, y_train)
+        score_teste = self.modelo.score(X_test, y_test)
+        
+        print(f"\n[ML] 📊 Resultados:")
+        print(f"       Treino: {score_treino:.1%}")
+        print(f"       Teste: {score_teste:.1%}")
+        
+        # Salvar
+        print(f"\n[ML] 💾 Salvando modelo...")
+        
+        with open(MODELO_PATH, 'wb') as f:
+            pickle.dump(self.modelo, f)
+        
+        with open(VECTORIZER_PATH, 'wb') as f:
+            pickle.dump(self.vectorizer, f)
+        
+        metadados = {
+            'treinado_em': datetime.now(timezone.utc).isoformat(),
+            'num_exemplos': len(textos),
+            'acuracia_treino': float(score_treino),
+            'acuracia_teste': float(score_teste),
+            'distribuicao': dict(Counter(prioridades)),
+            'categorias_unicas': categorias_unicas
+        }
+        
+        with open(os.path.join(MODELO_DIR, 'metadados.pkl'), 'wb') as f:
+            pickle.dump(metadados, f)
+        
+        self.metadados = metadados
+        self.carregado = True
+        
+        print(f"[ML] ✅ Modelo salvo!")
+        print("="*70)
+        
+        return True
+    
+    def prever(self, titulo: str, descricao: str, categoria: str) -> Optional[Dict]:
+        """Prediz prioridade"""
+        if not self.carregado:
+            if not self.carregar_modelo():
+                return None
+        
+        try:
+            texto = f"{titulo} {descricao}"
+            X_texto = self.vectorizer.transform([texto])
+            
+            categorias_unicas = self.metadados['categorias_unicas']
+            X_cat = np.zeros((1, len(categorias_unicas)))
+            if categoria in categorias_unicas:
+                X_cat[0, categorias_unicas.index(categoria)] = 1
+            
+            X = np.hstack([X_texto.toarray(), X_cat])
+            
+            prioridade_num = self.modelo.predict(X)[0]
+            probabilidades = self.modelo.predict_proba(X)[0]
+            
+            prioridade = self.prioridades_reverse[prioridade_num]
+            confianca = float(probabilidades[prioridade_num]) * 100
+            
+            urgencias = {'baixa': 2, 'media': 5, 'alta': 8, 'critica': 10}
+            
+            return {
+                'prioridade': prioridade,
+                'urgencia': urgencias[prioridade],
+                'confianca': confianca,
+                'metodo': 'modelo_ml',
+                'probabilidades': {
+                    self.prioridades_reverse[i]: float(prob)
+                    for i, prob in enumerate(probabilidades)
+                }
+            }
+            
+        except Exception as e:
+            print(f"[ML] ❌ Erro ao prever: {e}")
+            return None
+    
+    def verificar_retreino(self) -> bool:
+        """Verifica se precisa retreinar"""
+        if not self.metadados:
+            return False
+        
+        try:
+            data_treino = datetime.fromisoformat(self.metadados['treinado_em'])
+            
+            novas_correcoes = colecao_tickets.count_documents({
+                "foi_corrigido": True,
+                "corrigido_em": {"$gt": data_treino}
+            })
+            
+            if novas_correcoes >= 20:
+                print(f"[ML] ⚠️ {novas_correcoes} novas correções - retreino recomendado!")
+                return True
+            
+            return False
+            
+        except:
+            return False
+
+
+# Instância global
+modelo_ml = ModeloAprendizado()
+
+
+# ================================================================
+# SISTEMA DE FEEDBACK (APRENDIZADO)
+# ================================================================
+
+def registrar_correcao_atendente(
+    ticket_id: str,
+    prioridade_corrigida: str,
+    atendente_email: str,
+    motivo: str = None
+):
+    """Registra correção de atendente"""
+    from bson import ObjectId
+    
+    ticket = colecao_tickets.find_one({"_id": ObjectId(ticket_id)})
+    
+    if not ticket:
+        print(f"[FEEDBACK] ❌ Ticket {ticket_id} não encontrado")
+        return False
+    
+    prioridade_original = ticket.get('prioridade')
+    
+    if prioridade_original == prioridade_corrigida:
+        print(f"[FEEDBACK] ℹ️ Prioridade já está correta")
+        return False
+    
+    # Atualizar ticket
+    colecao_tickets.update_one(
+        {"_id": ObjectId(ticket_id)},
+        {
+            "$set": {
+                "prioridade_original_ia": prioridade_original,
+                "prioridade_corrigida_atendente": prioridade_corrigida,
+                "prioridade": prioridade_corrigida,
+                "foi_corrigido": True,
+                "corrigido_por": atendente_email,
+                "corrigido_em": datetime.now(timezone.utc),
+                "motivo_correcao": motivo
+            }
+        }
+    )
+    
+    # Registrar feedback
+    feedback = {
+        "ticket_id": ticket_id,
+        "ticket_numero": ticket.get('numero_ticket'),
+        "titulo": ticket.get('titulo'),
+        "descricao": ticket.get('descricao'),
+        "categoria": ticket.get('categoria'),
+        "prioridade_ia": prioridade_original,
+        "prioridade_correta": prioridade_corrigida,
+        "atendente": atendente_email,
+        "motivo": motivo,
+        "metodo_usado": ticket.get('analise_ia', {}).get('metodo_usado'),
+        "registrado_em": datetime.now(timezone.utc)
+    }
+    
+    colecao_feedback_ia.insert_one(feedback)
+    
+    print(f"[FEEDBACK] ✅ Correção registrada:")
+    print(f"           #{ticket.get('numero_ticket')}: {prioridade_original} → {prioridade_corrigida}")
+    
+    # Verificar se precisa retreinar
+    if modelo_ml.verificar_retreino():
+        print(f"[FEEDBACK] 🔄 Execute: python retreinar_modelo.py")
+    
+    return True
+
+
+def obter_estatisticas_feedback():
+    """Estatísticas de feedback"""
+    total_correcoes = colecao_tickets.count_documents({"foi_corrigido": True})
+    total_tickets = colecao_tickets.count_documents({})
+    
+    if total_tickets == 0:
+        print("\n[FEEDBACK] ⚠️ Nenhum ticket no banco")
+        return
+    
+    taxa_acerto = ((total_tickets - total_correcoes) / total_tickets) * 100
+    
+    print("\n" + "="*70)
+    print("📊 ESTATÍSTICAS DE APRENDIZADO")
+    print("="*70)
+    print(f"\n✅ Taxa de acerto: {taxa_acerto:.1f}%")
+    print(f"📊 Total: {total_tickets} tickets")
+    print(f"🔧 Correções: {total_correcoes}")
+    
+    # Erros comuns
+    erros = list(colecao_tickets.find({
+        "foi_corrigido": True,
+        "prioridade_original_ia": {"$exists": True}
+    }).limit(10))
+    
+    if erros:
+        print(f"\n🔄 Erros mais recentes:")
+        transicoes = []
+        for erro in erros:
+            trans = f"{erro['prioridade_original_ia']} → {erro['prioridade_corrigida_atendente']}"
+            transicoes.append(trans)
+        
+        counter = Counter(transicoes)
+        for trans, count in counter.most_common(5):
+            print(f"   {trans}: {count}x")
+
+
+# ================================================================
+# SISTEMA DE PRIORIZAÇÃO COM 4 CAMADAS (REGRAS + CACHE + ML + IA)
 # ================================================================
 
 class AnalisadorPrioridadeAvancado:
-    """Sistema inteligente de 3 camadas para priorização rápida e precisa"""
+    """Sistema de 4 camadas com aprendizado"""
     
-    # === CAMADA 1: REGRAS DETERMINÍSTICAS APRIMORADAS ===
-    
-    # CRÍTICO - Apenas quando sistema REALMENTE parado/inacessível
+    # PALAVRAS-CHAVE CRÍTICAS
     PALAVRAS_CRITICAS_SISTEMA_PARADO = [
         'sistema parado', 'sistema travado', 'sistema caiu', 'sistema down',
         'sistema fora do ar', 'sistema não abre', 'sistema não inicia',
@@ -292,7 +670,7 @@ class AnalisadorPrioridadeAvancado:
         'invasão', 'hackeado', 'dados vazados', 'vulnerabilidade crítica'
     ]
     
-    # ALTA - Problemas graves mas sistema ainda funciona parcialmente
+    # PALAVRAS ALTA
     PALAVRAS_ALTAS_ERRO = [
         'erro grave', 'erro crítico', 'bug grave', 'bug crítico',
         'falha grave', 'exception', 'crash'
@@ -303,22 +681,18 @@ class AnalisadorPrioridadeAvancado:
         'não importa', 'não exporta'
     ]
     
-    PALAVRAS_ALTAS_BLOQUEIO = [
-        'não consigo', 'bloqueado', 'impedido de', 'não permite'
-    ]
-    
     PALAVRAS_ALTAS_MULTIPLOS = [
         'todos os usuários', 'todos usuários', 'ninguém consegue',
         'departamento inteiro', 'equipe inteira', 'time inteiro'
     ]
     
-    # MÉDIA - Problemas moderados
+    # PALAVRAS MÉDIA
     PALAVRAS_MEDIAS = [
         'problema', 'dificuldade', 'erro', 'falha',
         'lento', 'demora', 'travando às vezes'
     ]
     
-    # BAIXA - Não urgente
+    # PALAVRAS BAIXA
     PALAVRAS_BAIXAS_DUVIDA = [
         'como faço', 'como fazer', 'como eu', 'dúvida',
         'não sei', 'poderia me ajudar', 'gostaria de saber'
@@ -331,19 +705,12 @@ class AnalisadorPrioridadeAvancado:
     
     @staticmethod
     def analisar_por_regras(titulo: str, descricao: str, categoria: str) -> Dict:
-        """
-        CAMADA 1: Análise com regras mais precisas e contextuais
-        """
+        """CAMADA 1: Regras determinísticas"""
         texto_completo = f"{titulo} {descricao}".lower()
         titulo_lower = titulo.lower()
         descricao_lower = descricao.lower()
         
-        # ============================================
-        # NÍVEL CRÍTICO (confiança 100%)
-        # Apenas quando sistema REALMENTE parado
-        # ============================================
-        
-        # Verificar combinações críticas no TEXTO COMPLETO
+        # CRÍTICO
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_SISTEMA_PARADO:
             if palavra in texto_completo:
                 return {
@@ -352,12 +719,11 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'critico',
                     'confianca': 100,
                     'metodo': 'regra_critica_sistema',
-                    'justificativa': f'Sistema completamente parado: "{palavra}"',
+                    'justificativa': f'Sistema parado: "{palavra}"',
                     'requer_atencao_imediata': True,
                     'tempo_estimado_resolucao': '15-30 minutos'
                 }
         
-        # Dados críticos
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_DADOS:
             if palavra in texto_completo:
                 return {
@@ -366,12 +732,11 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'critico',
                     'confianca': 100,
                     'metodo': 'regra_critica_dados',
-                    'justificativa': f'Problema crítico de dados: "{palavra}"',
+                    'justificativa': f'Dados críticos: "{palavra}"',
                     'requer_atencao_imediata': True,
                     'tempo_estimado_resolucao': '30-60 minutos'
                 }
         
-        # Produção parada
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_PRODUCAO:
             if palavra in texto_completo:
                 return {
@@ -385,7 +750,6 @@ class AnalisadorPrioridadeAvancado:
                     'tempo_estimado_resolucao': '15-30 minutos'
                 }
         
-        # Segurança
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_SEGURANCA:
             if palavra in texto_completo:
                 return {
@@ -394,17 +758,12 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'critico',
                     'confianca': 100,
                     'metodo': 'regra_critica_seguranca',
-                    'justificativa': f'Problema de segurança crítico: "{palavra}"',
+                    'justificativa': f'Segurança: "{palavra}"',
                     'requer_atencao_imediata': True,
                     'tempo_estimado_resolucao': '30-60 minutos'
                 }
         
-        # ============================================
-        # NÍVEL ALTO (confiança 85-90%)
-        # Problemas graves mas com workaround
-        # ============================================
-        
-        # Erros graves
+        # ALTA
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_ERRO:
             if palavra in texto_completo:
                 return {
@@ -413,17 +772,11 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'alto',
                     'confianca': 85,
                     'metodo': 'regra_alta_erro',
-                    'justificativa': f'Erro grave detectado: "{palavra}"',
+                    'justificativa': f'Erro grave: "{palavra}"',
                     'tempo_estimado_resolucao': '1-2 horas'
                 }
         
-        # Funcionalidade não funciona
-        funcionalidade_alta = False
-        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_FUNCIONALIDADE:
-            if palavra in texto_completo:
-                funcionalidade_alta = True
-                break
-        
+        funcionalidade_alta = any(p in texto_completo for p in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_FUNCIONALIDADE)
         if funcionalidade_alta:
             return {
                 'prioridade': 'alta',
@@ -431,11 +784,10 @@ class AnalisadorPrioridadeAvancado:
                 'impacto': 'alto',
                 'confianca': 85,
                 'metodo': 'regra_alta_funcionalidade',
-                'justificativa': 'Funcionalidade importante não está funcionando',
+                'justificativa': 'Funcionalidade importante quebrada',
                 'tempo_estimado_resolucao': '2-4 horas'
             }
         
-        # Múltiplos usuários afetados
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_MULTIPLOS:
             if palavra in texto_completo:
                 return {
@@ -444,13 +796,12 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'alto',
                     'confianca': 90,
                     'metodo': 'regra_alta_multiplos',
-                    'justificativa': f'Múltiplos usuários afetados: "{palavra}"',
+                    'justificativa': f'Múltiplos usuários: "{palavra}"',
                     'tempo_estimado_resolucao': '1-2 horas'
                 }
         
-        # Categoria BUG
+        # BUG
         if categoria and categoria.lower() == 'bug':
-            # Verificar se realmente é grave
             if any(p in texto_completo for p in ['grave', 'crítico', 'sério', 'importante']):
                 return {
                     'prioridade': 'alta',
@@ -458,40 +809,33 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'alto',
                     'confianca': 80,
                     'metodo': 'regra_bug_grave',
-                    'justificativa': 'Bug grave reportado',
+                    'justificativa': 'Bug grave',
                     'tempo_estimado_resolucao': '2-4 horas'
                 }
             else:
-                # Bug sem indicação de gravidade = média
                 return {
                     'prioridade': 'media',
                     'urgencia': 5,
                     'impacto': 'medio',
                     'confianca': 75,
                     'metodo': 'regra_bug_medio',
-                    'justificativa': 'Bug reportado sem indicação de gravidade',
+                    'justificativa': 'Bug sem gravidade clara',
                     'tempo_estimado_resolucao': '4-8 horas'
                 }
         
-        # ============================================
-        # NÍVEL BAIXO (confiança 85%)
-        # IMPORTANTE: Verificar BAIXO antes de MÉDIO
-        # ============================================
-        
-        # Dúvidas simples
+        # BAIXA (verificar ANTES de média)
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_BAIXAS_DUVIDA:
-            if palavra in titulo_lower or palavra in descricao_lower[:100]:  # Início da descrição
+            if palavra in titulo_lower or palavra in descricao_lower[:100]:
                 return {
                     'prioridade': 'baixa',
                     'urgencia': 2,
                     'impacto': 'baixo',
                     'confianca': 85,
                     'metodo': 'regra_baixa_duvida',
-                    'justificativa': 'Dúvida sobre uso do sistema',
+                    'justificativa': 'Dúvida sobre uso',
                     'tempo_estimado_resolucao': '1-2 horas'
                 }
         
-        # Sugestões
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_BAIXAS_SUGESTAO:
             if palavra in titulo_lower or palavra in descricao_lower[:100]:
                 return {
@@ -500,11 +844,10 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'baixo',
                     'confianca': 90,
                     'metodo': 'regra_baixa_sugestao',
-                    'justificativa': 'Sugestão de melhoria (não urgente)',
+                    'justificativa': 'Sugestão (não urgente)',
                     'tempo_estimado_resolucao': '24-48 horas'
                 }
         
-        # Categoria dúvida ou feature
         if categoria and categoria.lower() in ['duvida', 'feature', 'outro']:
             return {
                 'prioridade': 'baixa',
@@ -512,15 +855,11 @@ class AnalisadorPrioridadeAvancado:
                 'impacto': 'baixo',
                 'confianca': 80,
                 'metodo': 'regra_categoria_baixa',
-                'justificativa': f'Categoria "{categoria}" indica baixa urgência',
+                'justificativa': f'Categoria "{categoria}" - baixa urgência',
                 'tempo_estimado_resolucao': '4-24 horas'
             }
         
-        # ============================================
-        # NÍVEL MÉDIO (confiança 70%)
-        # Problemas moderados - PADRÃO
-        # ============================================
-        
+        # MÉDIA
         for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_MEDIAS:
             if palavra in texto_completo:
                 return {
@@ -529,26 +868,21 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'medio',
                     'confianca': 70,
                     'metodo': 'regra_media',
-                    'justificativa': f'Problema moderado detectado: "{palavra}"',
+                    'justificativa': f'Problema moderado: "{palavra}"',
                     'tempo_estimado_resolucao': '4-8 horas'
                 }
         
-        # ============================================
-        # ANÁLISE DE CONTEXTO (confiança 60%)
-        # ============================================
-        
-        # CAIXA ALTA no título = urgência (mas não necessariamente crítico)
+        # CAIXA ALTA
         if len(titulo) > 5 and sum(1 for c in titulo if c.isupper()) > len(titulo) * 0.7:
-            # Verificar se realmente é crítico ou apenas urgente
-            tem_palavra_critica = any(p in titulo_lower for p in ['parado', 'travado', 'caiu'])
-            if tem_palavra_critica:
+            tem_critica = any(p in titulo_lower for p in ['parado', 'travado', 'caiu'])
+            if tem_critica:
                 return {
                     'prioridade': 'critica',
                     'urgencia': 9,
                     'impacto': 'critico',
                     'confianca': 90,
                     'metodo': 'regra_caixa_alta_critica',
-                    'justificativa': 'CAIXA ALTA + palavra crítica = urgência máxima',
+                    'justificativa': 'CAIXA ALTA + palavra crítica',
                     'tempo_estimado_resolucao': '15-30 minutos'
                 }
             else:
@@ -558,11 +892,11 @@ class AnalisadorPrioridadeAvancado:
                     'impacto': 'alto',
                     'confianca': 60,
                     'metodo': 'regra_caixa_alta',
-                    'justificativa': 'Texto em CAIXA ALTA indica urgência do usuário',
+                    'justificativa': 'CAIXA ALTA = urgência',
                     'tempo_estimado_resolucao': '1-2 horas'
                 }
         
-        # Múltiplas exclamações = urgência
+        # EXCLAMAÇÕES
         if texto_completo.count('!') >= 3:
             return {
                 'prioridade': 'alta',
@@ -570,26 +904,24 @@ class AnalisadorPrioridadeAvancado:
                 'impacto': 'alto',
                 'confianca': 55,
                 'metodo': 'regra_exclamacoes',
-                'justificativa': 'Múltiplas exclamações indicam urgência',
+                'justificativa': 'Múltiplas exclamações',
                 'tempo_estimado_resolucao': '1-2 horas'
             }
         
-        # ============================================
-        # PADRÃO FINAL (baixa confiança)
-        # ============================================
+        # PADRÃO
         return {
             'prioridade': 'media',
             'urgencia': 5,
             'impacto': 'medio',
-            'confianca': 40,  # Baixa confiança = deve tentar cache ou IA
+            'confianca': 40,
             'metodo': 'padrao',
-            'justificativa': 'Sem padrão claro - classificado como médio por segurança',
+            'justificativa': 'Sem padrão claro',
             'tempo_estimado_resolucao': '4-8 horas'
         }
     
     @staticmethod
     def calcular_score(prioridade: str, urgencia: int, tempo_espera_minutos: float = 0) -> int:
-        """Calcula score numérico para ordenação inteligente na fila"""
+        """Calcula score para fila"""
         base_scores = {
             'critica': 10000,
             'alta': 5000,
@@ -602,18 +934,18 @@ class AnalisadorPrioridadeAvancado:
         score += min(tempo_espera_minutos, 1440) * 0.5
         
         return int(score)
-        
+
+
 def buscar_tickets_similares(titulo: str, descricao: str, limite: int = 5) -> List[Dict]:
-    """Busca tickets anteriores similares usando embeddings (CACHE)"""
+    """CAMADA 2: Cache de tickets similares"""
     try:
         texto_busca = f"{titulo} {descricao}"
         embedding_busca = modelo_embedding.encode([texto_busca])[0].reshape(1, -1)
         
-        # Buscar apenas tickets resolvidos/fechados com embedding
         tickets = list(colecao_tickets.find({
             "embedding": {"$exists": True},
             "status": {"$in": ["resolvido", "fechado"]}
-        }).limit(100))  # Limitar para performance
+        }).limit(100))
         
         if not tickets:
             return []
@@ -626,7 +958,7 @@ def buscar_tickets_similares(titulo: str, descricao: str, limite: int = 5) -> Li
             ticket_embedding = np.array(ticket["embedding"]).reshape(1, -1)
             similaridade = cosine_similarity(embedding_busca, ticket_embedding)[0][0]
             
-            if similaridade > 0.70:  # Threshold de 70%
+            if similaridade > 0.70:
                 tickets_similares.append({
                     "ticket": ticket,
                     "similaridade": float(similaridade)
@@ -636,183 +968,64 @@ def buscar_tickets_similares(titulo: str, descricao: str, limite: int = 5) -> Li
         return tickets_similares[:limite]
         
     except Exception as e:
-        print(f"[ERRO] Falha ao buscar tickets similares: {e}")
+        print(f"[CACHE] ❌ Erro: {e}")
         return []
 
 
 def analisar_ticket_com_ia(titulo: str, descricao: str, categoria: Optional[str] = None) -> Dict:
-    """
-    CAMADA 3: Usa o Gemini para análise detalhada (apenas casos complexos)
-    """
+    """CAMADA 4: IA Gemini (último recurso)"""
     
     prompt = f"""
-Você é um especialista em triagem de tickets de suporte de sistemas ERP empresariais.
-Analise o ticket abaixo e forneça uma avaliação detalhada e PRECISA.
+Você é especialista em triagem de tickets ERP.
 
 **TICKET:**
 Título: {titulo}
 Descrição: {descricao}
-Categoria informada: {categoria or "Não informada"}
+Categoria: {categoria or "Não informada"}
 
-**CRITÉRIOS CRÍTICOS DE PRIORIZAÇÃO:**
+**CRITÉRIOS:**
+🔴 CRÍTICA: Sistema parado, dados perdidos, segurança comprometida
+🟠 ALTA: Funcionalidade importante quebrada, múltiplos usuários afetados
+🟡 MÉDIA: Problemas moderados, workaround disponível
+🟢 BAIXA: Dúvidas, sugestões, problemas cosméticos
 
-🔴 **CRÍTICA** (USE SEMPRE que identificar):
-- Sistema PARADO, travado, fora do ar, não abre, não funciona COMPLETAMENTE
-- Perda de dados, corrupção de arquivos, banco de dados inacessível
-- Falha de segurança, invasão, vulnerabilidade crítica
-- Produção PARADA, processo de negócio BLOQUEADO
-- Múltiplos usuários ou departamentos IMPEDIDOS de trabalhar
-- Faturamento, pagamentos ou operações financeiras BLOQUEADAS
-- Palavras-chave: "parado", "travado", "não funciona nada", "sistema caiu", "não abre", "tudo parado", "emergência", "urgente", "crítico"
-
-🟠 **ALTA** (Problemas graves mas com workaround possível):
-- Funcionalidade IMPORTANTE quebrada mas sistema ainda utilizável
-- Bug grave que afeta múltiplos usuários
-- Erro que impede conclusão de tarefas importantes
-- Performance muito lenta que prejudica o trabalho
-- Relatório crítico não gerado
-
-🟡 **MÉDIA** (Problemas moderados):
-- Bug em funcionalidade secundária
-- Erro que afeta poucos usuários
-- Problema com workaround disponível
-- Lentidão moderada
-- Dúvida sobre uso de funcionalidade
-
-🟢 **BAIXA** (Não urgente):
-- Dúvida geral, pergunta sobre como usar
-- Sugestão de melhoria
-- Problema cosmético (visual)
-- Documentação ou treinamento
-
-**EXEMPLOS PRÁTICOS:**
-
-"MEU SISTEMA ESTÁ PARADO" → CRÍTICA (urgência: 10, impacto: critico)
-"Sistema travou e não abre mais" → CRÍTICA (urgência: 10, impacto: critico)
-"Não consigo acessar o sistema" → CRÍTICA (urgência: 9, impacto: critico)
-"Erro ao salvar nota fiscal" → ALTA (urgência: 8, impacto: alto)
-"Relatório não gera" → ALTA (urgência: 7, impacto: alto)
-"Como faço para cadastrar cliente?" → BAIXA (urgência: 2, impacto: baixo)
-"Sistema está lento" → MÉDIA (urgência: 5, impacto: medio)
-
-**ATENÇÃO ESPECIAL:**
-- Se o título/descrição contém "PARADO", "TRAVADO", "NÃO FUNCIONA", "CAIU", "FORA DO AR" → automaticamente CRÍTICA
-- Se menciona "PRODUÇÃO", "FATURAMENTO", "FINANCEIRO" + problema → aumentar prioridade
-- Se usa CAIXA ALTA ou múltiplas exclamações → indica urgência real do usuário
-- Se menciona "TODOS", "NINGUÉM CONSEGUE", "DEPARTAMENTO INTEIRO" → aumentar prioridade
-
-**ANÁLISE SOLICITADA:**
-Retorne APENAS um JSON válido (sem markdown, sem ```json) com:
+Retorne JSON:
 {{
   "prioridade": "critica|alta|media|baixa",
-  "categoria_sugerida": "tecnico|financeiro|duvida|bug|feature|outro",
   "urgencia": 1-10,
   "impacto": "critico|alto|medio|baixo",
-  "palavras_chave": ["palavra1", "palavra2", "palavra3"],
-  "resumo": "breve resumo objetivo do problema em 1 frase",
-  "justificativa": "explicação clara de POR QUE essa prioridade foi escolhida",
-  "tempo_estimado_resolucao": "ex: 15 minutos, 1-2 horas, 24 horas",
-  "requer_atencao_imediata": true|false
+  "justificativa": "por que essa prioridade",
+  "tempo_estimado_resolucao": "ex: 1-2 horas"
 }}
-
-**SEJA RIGOROSO:** Se há indicação clara de sistema parado ou funcionalidade crítica bloqueada, não hesite em marcar como CRÍTICA.
 """
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        
-        generation_config = {
-            "temperature": 0.1,
-            "max_output_tokens": 1024,
-            "top_p": 0.8,
-            "top_k": 10
-        }
-        
-        response = model.generate_content(prompt, generation_config=generation_config)
+        response = model.generate_content(prompt, generation_config={"temperature": 0.1})
         response_text = response.text.strip()
         
-        # Remover marcadores de código markdown
-        if response_text.startswith("```json"):
+        if response_text.startswith("```"):
             response_text = response_text.replace("```json", "").replace("```", "").strip()
-        elif response_text.startswith("```"):
-            response_text = response_text.replace("```", "").strip()
         
         analise = json.loads(response_text)
         
-        # Validação adicional: forçar CRÍTICA se palavras-chave óbvias
+        # Validação
         texto_completo = f"{titulo} {descricao}".lower()
-        palavras_criticas = [
-            "parado", "travado", "não funciona", "caiu", "fora do ar",
-            "não abre", "sistema down", "tudo parado", "bloqueado",
-            "não consigo acessar", "não entra", "emergência"
-        ]
+        palavras_criticas = ["parado", "travado", "não funciona", "caiu", "fora do ar"]
         
-        if any(palavra in texto_completo for palavra in palavras_criticas):
+        if any(p in texto_completo for p in palavras_criticas):
             if analise.get("prioridade") not in ["critica", "alta"]:
-                print(f"⚠️ CORREÇÃO: Detectadas palavras críticas, ajustando prioridade de '{analise.get('prioridade')}' para 'critica'")
                 analise["prioridade"] = "critica"
-                analise["urgencia"] = max(analise.get("urgencia", 5), 9)
-                analise["impacto"] = "critico"
-                analise["requer_atencao_imediata"] = True
-        
-        print(f"[IA] Análise concluída:")
-        print(f"  - Prioridade: {analise.get('prioridade', 'N/A')}")
-        print(f"  - Urgência: {analise.get('urgencia', 'N/A')}/10")
-        print(f"  - Impacto: {analise.get('impacto', 'N/A')}")
-        print(f"  - Justificativa: {analise.get('justificativa', 'N/A')}")
+                analise["urgencia"] = 10
         
         return analise
         
-    except json.JSONDecodeError as e:
-        print(f"[ERRO] Falha ao parsear JSON da IA: {e}")
-        print(f"[ERRO] Resposta recebida: {response_text}")
-        
-        # Fallback com análise básica
-        texto_completo = f"{titulo} {descricao}".lower()
-        palavras_criticas = ["parado", "travado", "não funciona", "caiu", "fora do ar"]
-        
-        if any(palavra in texto_completo for palavra in palavras_criticas):
-            return {
-                "prioridade": "critica",
-                "urgencia": 10,
-                "impacto": "critico",
-                "requer_atencao_imediata": True,
-                "justificativa": "Sistema parado detectado - prioridade crítica automática (fallback)",
-                "tempo_estimado_resolucao": "15-30 minutos",
-                "erro": "Falha no parsing, mas análise básica aplicada"
-            }
-        
-        return {
-            "prioridade": "media",
-            "urgencia": 5,
-            "impacto": "medio",
-            "tempo_estimado_resolucao": "4-8 horas",
-            "erro": "Falha ao analisar resposta da IA"
-        }
-        
     except Exception as e:
-        print(f"[ERRO] Falha ao chamar IA: {e}")
-        
-        # Fallback básico
-        texto_completo = f"{titulo} {descricao}".lower()
-        palavras_criticas = ["parado", "travado", "não funciona", "caiu", "fora do ar"]
-        
-        if any(palavra in texto_completo for palavra in palavras_criticas):
-            return {
-                "prioridade": "critica",
-                "urgencia": 10,
-                "impacto": "critico",
-                "requer_atencao_imediata": True,
-                "justificativa": "Sistema parado detectado (fallback)",
-                "tempo_estimado_resolucao": "15-30 minutos",
-                "erro": str(e)
-            }
-        
+        print(f"[IA] ❌ Erro: {e}")
         return {
             "prioridade": "media",
             "urgencia": 5,
             "impacto": "medio",
-            "tempo_estimado_resolucao": "4-8 horas",
             "erro": str(e)
         }
 
@@ -822,115 +1035,116 @@ def analisar_prioridade_hibrido(
     descricao: str,
     categoria: str,
     usar_ia: bool = True,
-    usar_cache: bool = True
+    usar_cache: bool = True,
+    usar_ml: bool = True
 ) -> Dict:
     """
-    🚀 SISTEMA HÍBRIDO DE 3 CAMADAS (PRODUÇÃO):
+    🧠 SISTEMA COM 4 CAMADAS (+ APRENDIZADO):
     
-    1. REGRAS (0-5ms) - 90% dos casos, alta confiança
-    2. CACHE (10-50ms) - tickets similares já resolvidos
-    3. IA (1-3s) - apenas casos complexos sem padrão claro
-    
-    Retorna análise completa com método usado e tempo de processamento
+    1. REGRAS (0-5ms) - Padrões fixos
+    2. CACHE (10-50ms) - Tickets similares
+    3. ML (50-100ms) - 🆕 APRENDE COM FEEDBACK!
+    4. IA Gemini (1-3s) - Último recurso
     """
     
-    print(f"\n[PRIORIZAÇÃO HÍBRIDA] Analisando ticket...")
+    print(f"\n[PRIORIZAÇÃO] Analisando...")
     tempo_inicio = time.time()
     
-    # ============================================
-    # CAMADA 1: REGRAS DETERMINÍSTICAS (SEMPRE)
-    # ============================================
-    analise_regras = AnalisadorPrioridadeAvancado.analisar_por_regras(
-        titulo, descricao, categoria
-    )
+    # CAMADA 1: REGRAS
+    analise_regras = AnalisadorPrioridadeAvancado.analisar_por_regras(titulo, descricao, categoria)
+    print(f"  ✓ Regras: {analise_regras['prioridade'].upper()} ({analise_regras['confianca']}%)")
     
-    print(f"  ✓ Regras: {analise_regras['prioridade'].upper()} (confiança: {analise_regras['confianca']}%)")
-    
-    # Se confiança alta (>= 85%), usar resultado das regras diretamente
     if analise_regras['confianca'] >= 85:
         tempo_total = int((time.time() - tempo_inicio) * 1000)
-        print(f"  ✓ Alta confiança - decisão em {tempo_total}ms")
-        
         score = AnalisadorPrioridadeAvancado.calcular_score(
             analise_regras['prioridade'],
             analise_regras['urgencia']
         )
-        
         return {
-            'prioridade': analise_regras['prioridade'],
-            'urgencia': analise_regras['urgencia'],
-            'impacto': analise_regras['impacto'],
+            **analise_regras,
             'score': score,
-            'confianca': analise_regras['confianca'],
-            'metodo': analise_regras['metodo'],
-            'justificativa': analise_regras['justificativa'],
-            'tempo_estimado_resolucao': analise_regras.get('tempo_estimado_resolucao', 'A definir'),
-            'requer_atencao_imediata': analise_regras.get('requer_atencao_imediata', False),
             'tempo_processamento_ms': tempo_total,
-            'analise_ia': None  # IA não foi usada
+            'analise_ia': None
         }
     
-    # ============================================
-    # CAMADA 2: CACHE DE TICKETS SIMILARES
-    # ============================================
+    # CAMADA 2: CACHE
     if usar_cache:
         try:
-            print(f"  🔍 Buscando tickets similares...")
-            tickets_similares = buscar_tickets_similares(titulo, descricao, limite=3)
+            print(f"  🔍 Cache...")
+            similares = buscar_tickets_similares(titulo, descricao, limite=3)
             
-            if tickets_similares and tickets_similares[0]['similaridade'] > 0.90:
-                ticket_similar = tickets_similares[0]['ticket']
+            if similares and similares[0]['similaridade'] > 0.90:
+                ticket_similar = similares[0]['ticket']
                 tempo_total = int((time.time() - tempo_inicio) * 1000)
                 
-                print(f"  ✓ Cache hit! Similaridade: {tickets_similares[0]['similaridade']:.1%} em {tempo_total}ms")
+                print(f"  ✓ Cache hit! ({tempo_total}ms)")
                 
-                # Usar prioridade do ticket similar
-                prioridade_cached = ticket_similar.get('prioridade', 'media')
-                urgencia_cached = ticket_similar.get('analise_ia', {}).get('urgencia', 5)
-                
-                score = AnalisadorPrioridadeAvancado.calcular_score(
-                    prioridade_cached,
-                    urgencia_cached
-                )
+                prioridade = ticket_similar.get('prioridade', 'media')
+                urgencia = ticket_similar.get('analise_ia', {}).get('urgencia', 5)
+                score = AnalisadorPrioridadeAvancado.calcular_score(prioridade, urgencia)
                 
                 return {
-                    'prioridade': prioridade_cached,
-                    'urgencia': urgencia_cached,
+                    'prioridade': prioridade,
+                    'urgencia': urgencia,
                     'impacto': ticket_similar.get('analise_ia', {}).get('impacto', 'medio'),
                     'score': score,
                     'confianca': 95,
                     'metodo': 'cache_similar',
-                    'justificativa': f"Baseado em ticket similar: #{ticket_similar.get('numero_ticket', 'N/A')}",
+                    'justificativa': f"Similar a #{ticket_similar.get('numero_ticket', 'N/A')}",
                     'tempo_estimado_resolucao': ticket_similar.get('analise_ia', {}).get('tempo_estimado_resolucao', 'A definir'),
                     'tempo_processamento_ms': tempo_total,
-                    'ticket_similar_id': str(ticket_similar['_id']),
                     'analise_ia': None
                 }
         except Exception as e:
-            print(f"  ⚠️ Cache falhou: {e}")
+            print(f"  ⚠️ Cache: {e}")
     
-    # ============================================
-    # CAMADA 3: IA GEMINI (apenas casos complexos)
-    # ============================================
+    # CAMADA 3: MODELO ML (APRENDIZADO!) 🆕
+    if usar_ml:
+        try:
+            print(f"  🤖 ML...")
+            predicao = modelo_ml.prever(titulo, descricao, categoria)
+            
+            if predicao and predicao['confianca'] >= 70:
+                tempo_total = int((time.time() - tempo_inicio) * 1000)
+                
+                print(f"  ✓ ML: {predicao['prioridade'].upper()} ({predicao['confianca']:.0f}%) em {tempo_total}ms")
+                
+                score = AnalisadorPrioridadeAvancado.calcular_score(
+                    predicao['prioridade'],
+                    predicao['urgencia']
+                )
+                
+                return {
+                    'prioridade': predicao['prioridade'],
+                    'urgencia': predicao['urgencia'],
+                    'impacto': {'baixa': 'baixo', 'media': 'medio', 'alta': 'alto', 'critica': 'critico'}[predicao['prioridade']],
+                    'score': score,
+                    'confianca': predicao['confianca'],
+                    'metodo': 'modelo_ml_aprendizado',
+                    'justificativa': f"ML treinado ({predicao['confianca']:.0f}% confiança)",
+                    'tempo_estimado_resolucao': 'Baseado em histórico',
+                    'tempo_processamento_ms': tempo_total,
+                    'probabilidades_ml': predicao['probabilidades'],
+                    'analise_ia': None
+                }
+        except Exception as e:
+            print(f"  ⚠️ ML: {e}")
+    
+    # CAMADA 4: IA GEMINI
     if usar_ia:
         try:
-            print(f"  🤖 Usando IA para análise detalhada...")
-            
+            print(f"  🤖 IA Gemini...")
             analise_ia = analisar_ticket_com_ia(titulo, descricao, categoria)
             
             tempo_total = int((time.time() - tempo_inicio) * 1000)
-            print(f"  ✓ IA concluída em {tempo_total}ms")
+            print(f"  ✓ IA: {tempo_total}ms")
             
-            # Combinar resultado da IA com validação das regras
             prioridade_final = analise_ia.get('prioridade', 'media')
             
-            # IMPORTANTE: Se regras dizem CRÍTICA mas IA diz MÉDIA, confiar nas regras
+            # Validação com regras
             if analise_regras['prioridade'] == 'critica' and prioridade_final not in ['critica', 'alta']:
-                print(f"  ⚠️ Correção: Regras indicam CRÍTICA, sobrescrevendo IA")
                 prioridade_final = 'critica'
                 analise_ia['urgencia'] = 10
-                analise_ia['impacto'] = 'critico'
-                analise_ia['requer_atencao_imediata'] = True
             
             score = AnalisadorPrioridadeAvancado.calcular_score(
                 prioridade_final,
@@ -944,103 +1158,66 @@ def analisar_prioridade_hibrido(
                 'score': score,
                 'confianca': 95,
                 'metodo': 'ia_gemini',
-                'justificativa': analise_ia.get('justificativa', 'Análise detalhada por IA'),
+                'justificativa': analise_ia.get('justificativa', ''),
                 'tempo_estimado_resolucao': analise_ia.get('tempo_estimado_resolucao', 'A definir'),
-                'requer_atencao_imediata': analise_ia.get('requer_atencao_imediata', False),
                 'tempo_processamento_ms': tempo_total,
                 'analise_ia': analise_ia
             }
-            
         except Exception as e:
-            print(f"  ❌ IA falhou: {e}")
+            print(f"  ❌ IA: {e}")
     
-    # ============================================
-    # FALLBACK: Usar resultado das regras básicas
-    # ============================================
+    # FALLBACK
     tempo_total = int((time.time() - tempo_inicio) * 1000)
-    print(f"  ↩️ Fallback: usando regras básicas ({tempo_total}ms)")
-    
     score = AnalisadorPrioridadeAvancado.calcular_score(
         analise_regras['prioridade'],
         analise_regras['urgencia']
     )
     
     return {
-        'prioridade': analise_regras['prioridade'],
-        'urgencia': analise_regras['urgencia'],
-        'impacto': analise_regras['impacto'],
+        **analise_regras,
         'score': score,
-        'confianca': analise_regras['confianca'],
         'metodo': 'regras_fallback',
-        'justificativa': analise_regras['justificativa'],
-        'tempo_estimado_resolucao': analise_regras.get('tempo_estimado_resolucao', 'A definir'),
         'tempo_processamento_ms': tempo_total,
         'analise_ia': None
     }
 
 
-# ================================================================
-# FUNÇÃO LEGACY (compatibilidade com código existente)
-# ================================================================
-
-def calcular_prioridade_inteligente(
-    titulo: str, 
-    descricao: str, 
-    categoria: str,
-    usar_ia: bool = True,
-    cliente_email: Optional[str] = None
-) -> Dict:
-    """
-    Função de compatibilidade - usa o novo sistema híbrido
-    Mantida para não quebrar código existente
-    """
-    # Usar o novo sistema híbrido
-    resultado = analisar_prioridade_hibrido(
-        titulo, 
-        descricao, 
-        categoria, 
-        usar_ia=usar_ia,
-        usar_cache=True
-    )
+# FUNÇÃO LEGACY (compatibilidade)
+def calcular_prioridade_inteligente(titulo: str, descricao: str, categoria: str, usar_ia: bool = True, cliente_email: Optional[str] = None) -> Dict:
+    """Compatibilidade com código antigo"""
+    resultado = analisar_prioridade_hibrido(titulo, descricao, categoria, usar_ia=usar_ia)
     
-    # Buscar tickets similares para recomendações
     similares = buscar_tickets_similares(titulo, descricao, limite=3)
     resultado['tickets_similares'] = similares
     
-    # Gerar recomendações
     recomendacoes = []
-    
     if resultado['prioridade'] in ['critica', 'alta']:
-        recomendacoes.append("⚠️ Requer atenção prioritária!")
+        recomendacoes.append("⚠️ Prioridade!")
     
     if similares:
-        tempos = [s['ticket'].get('tempo_resolucao_minutos', 0) 
-                 for s in similares if s['ticket'].get('tempo_resolucao_minutos')]
+        tempos = [s['ticket'].get('tempo_resolucao_minutos', 0) for s in similares if s['ticket'].get('tempo_resolucao_minutos')]
         if tempos:
             tempo_medio = sum(tempos) / len(tempos)
-            recomendacoes.append(f"📊 Tickets similares resolvidos em ~{int(tempo_medio)} minutos")
+            recomendacoes.append(f"📊 ~{int(tempo_medio)} min (histórico)")
     
-    # Verificar se cliente é VIP
     if cliente_email:
         try:
             from database import colecao_usuarios
             usuario = colecao_usuarios.find_one({"email": cliente_email})
             if usuario and usuario.get("tipo_usuario") == "vip":
                 resultado['score'] += 2000
-                recomendacoes.append("⭐ Cliente VIP - prioridade aumentada")
+                recomendacoes.append("⭐ Cliente VIP")
         except:
             pass
     
     resultado['recomendacoes'] = recomendacoes
-    
     return resultado
 
 
 def adicionar_embedding_ao_ticket(ticket_id: str, titulo: str, descricao: str):
-    """Adiciona embedding ao ticket para futuras buscas no cache"""
+    """Adiciona embedding ao ticket"""
     try:
         from bson import ObjectId
-        
         texto = f"{titulo} {descricao}"
         embedding = modelo_embedding.encode([texto])[0].tolist()
         
@@ -1049,63 +1226,52 @@ def adicionar_embedding_ao_ticket(ticket_id: str, titulo: str, descricao: str):
             {"$set": {"embedding": embedding}}
         )
         
-        print(f"[EMBEDDING] Embedding adicionado ao ticket {ticket_id}")
+        print(f"[EMBEDDING] ✅ Adicionado ao ticket {ticket_id[:8]}...")
         
     except Exception as e:
-        print(f"[ERRO] Falha ao adicionar embedding: {e}")
+        print(f"[EMBEDDING] ❌ Erro: {e}")
 
 
 def gerar_resposta_automatica_ticket(ticket: Dict) -> Optional[str]:
-    """Tenta gerar uma resposta automática baseada em tickets similares"""
-    
-    similares = buscar_tickets_similares(
-        ticket["titulo"], 
-        ticket["descricao"],
-        limite=3
-    )
+    """Resposta automática baseada em similares"""
+    similares = buscar_tickets_similares(ticket["titulo"], ticket["descricao"], limite=3)
     
     if not similares or similares[0]["similaridade"] < 0.85:
         return None
     
     ticket_similar = similares[0]["ticket"]
     mensagens = ticket_similar.get("mensagens", [])
-    respostas_atendente = [m for m in mensagens if m.get("is_atendente", False)]
+    respostas = [m for m in mensagens if m.get("is_atendente", False)]
     
-    if not respostas_atendente:
+    if not respostas:
         return None
     
     prompt = f"""
-Você é um atendente de suporte técnico.
+Você é atendente de suporte.
 
-Um cliente abriu este ticket:
-**Título:** {ticket["titulo"]}
-**Descrição:** {ticket["descricao"]}
+Cliente: {ticket["titulo"]}
+Descrição: {ticket["descricao"]}
 
-Encontramos um ticket similar resolvido:
-**Solução anterior:** {respostas_atendente[0]["conteudo"]}
+Solução similar: {respostas[0]["conteudo"]}
 
-Adapte a solução anterior para o novo ticket.
-Seja claro, profissional e direto.
+Adapte a solução. Seja claro e profissional.
 """
     
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        response = model.generate_content(
-            prompt,
-            generation_config={"temperature": 0.3, "max_output_tokens": 512}
-        )
+        response = model.generate_content(prompt, generation_config={"temperature": 0.3})
         
         resposta = response.text.strip()
-        resposta_final = f"{resposta}\n\n---\n_💡 Resposta sugerida automaticamente. Um atendente irá revisar._"
-        
-        return resposta_final
+        return f"{resposta}\n\n---\n_💡 Sugestão automática. Atendente revisará._"
         
     except Exception as e:
-        print(f"[ERRO] Falha ao gerar resposta automática: {e}")
+        print(f"[RESPOSTA AUTO] ❌ Erro: {e}")
         return None
 
 
-print("[✓] Sistema híbrido de priorização carregado!")
-print("    • Camada 1: Regras determinísticas (0-5ms)")
-print("    • Camada 2: Cache de tickets similares (10-50ms)")
-print("    • Camada 3: IA Gemini (1-3s)")
+print("[✓] Sistema carregado!")
+print("    • Camada 1: Regras (0-5ms)")
+print("    • Camada 2: Cache (10-50ms)")
+print("    • Camada 3: ML Aprendizado (50-100ms) 🆕")
+print("    • Camada 4: IA Gemini (1-3s)")
+print("\n💡 Para treinar ML: python retreinar_modelo.py")
