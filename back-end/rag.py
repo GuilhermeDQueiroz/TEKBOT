@@ -4,6 +4,7 @@ import json
 import numpy as np
 import time
 import pickle
+import re
 from datetime import datetime, timezone
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -38,6 +39,249 @@ os.makedirs(MODELO_DIR, exist_ok=True)
 MODELO_PATH = os.path.join(MODELO_DIR, "modelo_prioridade.pkl")
 VECTORIZER_PATH = os.path.join(MODELO_DIR, "vectorizer.pkl")
 
+class ValidadorTopicosProibidos:
+    """
+    Sistema robusto para detectar e bloquear perguntas sobre 
+    tópicos fiscais, tributários e de qualificação
+    """
+    
+    def __init__(self):
+        # Padrões de detecção
+        self.padroes_cfop = [
+            r'\bcfop\b',
+            r'\bc\.?f\.?o\.?p\.?\b',
+            r'\bcódigo\s+fiscal\b',
+            r'\bcodigo\s+fiscal\b',
+            r'\boperaç[aã]o\s+fiscal\b',
+            r'\b[0-9]{4}\b.*\b(entrada|saída|venda|compra)\b'  # Ex: "5102 venda"
+        ]
+        
+        self.padroes_cst = [
+            r'\bcst\b',
+            r'\bc\.?s\.?t\.?\b',
+            r'\bcsosn\b',
+            r'\bc\.?s\.?o\.?s\.?n\.?\b',
+            r'\bcódigo\s+de\s+situa[cç][aã]o\s+tribut[aá]ria\b',
+            r'\bcodigo\s+de\s+situacao\s+tributaria\b',
+            r'\bsitua[cç][aã]o\s+tribut[aá]ria\b'
+        ]
+        
+        self.padroes_impostos = [
+            r'\bicms\b',
+            r'\bi\.?c\.?m\.?s\.?\b',
+            r'\bipi\b',
+            r'\bi\.?p\.?i\.?\b',
+            r'\bpis\b',
+            r'\bp\.?i\.?s\.?\b',
+            r'\bcofins\b',
+            r'\bc\.?o\.?f\.?i\.?n\.?s\.?\b',
+            r'\biss\b',
+            r'\bi\.?s\.?s\.?\b',
+            r'\bimposto\b',
+            r'\btribut[oaáã]\b',
+            r'\btributa[cç][aã]o\b',
+            r'\balíquota\b',
+            r'\baliquota\b',
+            r'\bregime\s+tribut[aá]rio\b'
+        ]
+        
+        # Contextos válidos que NÃO devem ser bloqueados
+        self.contextos_validos = [
+            r'\bemitir\s+nota\s*fiscal\b',
+            r'\bimprimir\s+nota\s*fiscal\b',
+            r'\bcancelar\s+nota\s*fiscal\b',
+            r'\bnota\s*fiscal\s+eletr[ôo]nica\b',
+            r'\bnfe\b',
+            r'\bnf-?e\b',
+            r'\bimpress[aã]o\s+fiscal\b',
+            r'\bimprimir\b.*\bfiscal\b',
+            r'\bconfigurar\s+impress\w+\s+fiscal\b',
+            r'\bcadastrar\b',
+            r'\bregistrar\b',
+            r'\brelat[oó]rio\b'
+        ]
+        
+        self.padroes_percentuais = [
+            r'\b\d+%\b.*\b(icms|ipi|pis|cofins|iss|imposto|tributo)\b',
+            r'\b(icms|ipi|pis|cofins|iss|imposto|tributo)\b.*\b\d+%\b',
+            r'\bpercentual\s+(de\s+)?(icms|ipi|pis|cofins|iss|imposto|tributo)\b',
+            r'\balíquota\s+de\b',
+            r'\baliquota\s+de\b',
+            r'\btaxa\s+de\s+(icms|ipi|pis|cofins|iss)\b'
+        ]
+        
+        self.padroes_sem_nota = [
+            r'\bsem\s+nota\b',
+            r'\bsem\s+n\.?f\.?\b',
+            r'\bsem\s+nota\s+fiscal\b',
+            r'\bnão\s+emitir\s+nota\b',
+            r'\bnao\s+emitir\s+nota\b',
+            r'\bvenda\s+sem\s+nota\b',
+            r'\bcompra\s+sem\s+nota\b'
+        ]
+        
+        self.padroes_qualificacao = [
+            r'\bqualifica[cç][aã]o\s+0\b',
+            r'\bqualifica[cç][aã]o\s+1\b',
+            r'\bqualifica[cç][aã]o\s+zero\b',
+            r'\bqualifica[cç][aã]o\s+um\b'
+        ]
+        
+        # Palavras-chave diretas
+        self.palavras_proibidas = {
+            'cfop', 'cst', 'csosn', 'icms', 'ipi', 'pis', 'cofins', 'iss',
+            'tributação', 'tributacao', 'alíquota', 'aliquota', 'sem nota',
+            'qualificação 0', 'qualificação 1', 'qualificacao 0', 'qualificacao 1'
+        }
+    
+    def validar(self, pergunta: str) -> Dict:
+        """
+        Valida se a pergunta contém tópicos proibidos
+        
+        Retorna:
+        {
+            'permitido': bool,
+            'motivo': str,
+            'categoria_bloqueio': str
+        }
+        """
+        pergunta_lower = pergunta.lower()
+        
+        # 🟢 PRIMEIRO: Verificar se está em contexto válido
+        for padrao_valido in self.contextos_validos:
+            if re.search(padrao_valido, pergunta_lower, re.IGNORECASE):
+                print(f"[VALIDAÇÃO] ✅ Contexto válido detectado - permitindo")
+                return {
+                    'permitido': True,
+                    'motivo': None,
+                    'categoria_bloqueio': None
+                }
+        
+        # 1. Verificação de CFOP
+        for padrao in self.padroes_cfop:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'CFOP (Código Fiscal de Operações e Prestações)',
+                    'categoria_bloqueio': 'fiscal'
+                }
+        
+        # 2. Verificação de CST/CSOSN
+        for padrao in self.padroes_cst:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'CST/CSOSN (Código de Situação Tributária)',
+                    'categoria_bloqueio': 'tributario'
+                }
+        
+        # 3. Verificação de Impostos
+        for padrao in self.padroes_impostos:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Impostos e Tributações (ICMS, IPI, PIS, COFINS, ISS)',
+                    'categoria_bloqueio': 'tributario'
+                }
+        
+        # 4. Verificação de Percentuais de Impostos
+        for padrao in self.padroes_percentuais:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Percentuais/Alíquotas de Impostos',
+                    'categoria_bloqueio': 'percentual_imposto'
+                }
+        
+        # 5. Verificação de "Sem Nota"
+        for padrao in self.padroes_sem_nota:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Operações sem Nota Fiscal',
+                    'categoria_bloqueio': 'sem_nota'
+                }
+        
+        # 6. Verificação de Qualificação 0 e 1
+        for padrao in self.padroes_qualificacao:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Qualificação 0 ou 1',
+                    'categoria_bloqueio': 'qualificacao'
+                }
+        
+        # 7. Verificação de palavras-chave diretas
+        for palavra in self.palavras_proibidas:
+            if palavra in pergunta_lower:
+                return {
+                    'permitido': False,
+                    'motivo': f'Termo proibido: {palavra.upper()}',
+                    'categoria_bloqueio': 'palavra_chave'
+                }
+        
+        # Pergunta permitida
+        return {
+            'permitido': True,
+            'motivo': None,
+            'categoria_bloqueio': None
+        }
+    
+    def gerar_mensagem_bloqueio(self, validacao: Dict) -> str:
+        """
+        Gera mensagem amigável explicando porque a pergunta foi bloqueada
+        """
+        motivo = validacao.get('motivo', 'tópico restrito')
+        categoria = validacao.get('categoria_bloqueio', '')
+        
+        mensagens = {
+            'fiscal': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Este assistente não fornece informações sobre questões fiscais e tributárias, pois:
+- São temas que exigem consultoria especializada de um contador
+- As regras variam conforme legislação específica de cada estado/município
+- Informações incorretas podem causar problemas legais e fiscais
+
+**📞 Recomendação:** Entre em contato com seu contador ou consultor fiscal para obter informações precisas e atualizadas.""",
+            
+            'tributario': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Questões tributárias devem ser tratadas por profissionais especializados:
+- Contador registrado no CRC
+- Consultor tributário
+- Departamento fiscal da sua empresa
+
+**💡 Dica:** Posso ajudar com outras funcionalidades do sistema ERP, como cadastros, emissão de documentos, relatórios, etc.""",
+            
+            'percentual_imposto': f"""🚫 Desculpe, não posso fornecer informações sobre **{motivo}**.
+
+Alíquotas e percentuais de impostos:
+- Variam conforme estado, município e tipo de produto/serviço
+- Mudam frequentemente conforme legislação
+- Exigem análise técnica de um contador
+
+**⚠️ Importante:** Consulte sempre seu contador para valores exatos e atualizados.""",
+            
+            'sem_nota': f"""🚫 Desculpe, não posso ajudar com questões sobre **{motivo}**.
+
+Todas as operações comerciais devem seguir a legislação fiscal vigente, incluindo a emissão de documentos fiscais apropriados.
+
+**📋 Lembre-se:** A emissão de notas fiscais é obrigatória por lei e essencial para a regularidade do seu negócio.""",
+            
+            'qualificacao': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Este é um tópico específico de configuração fiscal que requer orientação técnica especializada.
+
+**👨‍💼 Contate:** Seu contador ou consultor fiscal para esclarecimentos.""",
+            
+            'palavra_chave': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Para questões fiscais e tributárias, consulte sempre um profissional habilitado.
+
+**✅ Posso ajudar com:** Funcionalidades do sistema, cadastros, emissão de documentos, relatórios, processos operacionais, etc."""
+        }
+        
+        return mensagens.get(categoria, mensagens['palavra_chave'])
 
 # ==========================
 # CONTEXTO & HISTÓRICO
@@ -253,7 +497,42 @@ def registrarInteracao(pergunta: str, resposta: str, contexto: List, sessao_id: 
 # ==========================
 # PIPELINE COMPLETO
 # ==========================
+validador = ValidadorTopicosProibidos()
+
+
 def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
+    """
+    Pipeline completo de processamento com validação de tópicos proibidos
+    
+    MODIFICADO: Agora valida tópicos proibidos ANTES de processar
+    """
+    
+    # 🔒 VALIDAÇÃO DE TÓPICOS PROIBIDOS
+    validacao = validador.validar(pergunta)
+    
+    if not validacao['permitido']:
+        mensagem_bloqueio = validador.gerar_mensagem_bloqueio(validacao)
+        print(f"[VALIDAÇÃO] ❌ Pergunta bloqueada: {validacao['motivo']}")
+        
+        # Registra tentativa de pergunta proibida (opcional, para análise)
+        try:
+            from database import colecao_interacoes
+            from datetime import datetime, timezone
+            
+            colecao_interacoes.insert_one({
+                "tipo": "bloqueio",
+                "pergunta": pergunta,
+                "motivo_bloqueio": validacao['motivo'],
+                "categoria_bloqueio": validacao['categoria_bloqueio'],
+                "sessao_id": sessao_id,
+                "timestamp": datetime.now(timezone.utc)
+            })
+        except Exception as e:
+            print(f"[WARN] Não foi possível registrar bloqueio: {e}")
+        
+        return mensagem_bloqueio
+    
+    # ✅ PROCESSAMENTO NORMAL (código original)
     contexto_relevante = recuperarInfoRelevantes(pergunta, sessao_id)
     resposta = ""
 
@@ -261,7 +540,10 @@ def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
         pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
         doc_top = contexto_relevante[0]
         doc_embedding = modelo_embedding.encode([doc_top["texto"]]).reshape(1, -1)
+        
+        from sklearn.metrics.pairwise import cosine_similarity
         similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
+        
         if similaridade > 0.9 and doc_top.get("resposta"):
             resposta = doc_top["resposta"]
             registrarInteracao(pergunta, resposta, [doc_top], sessao_id)
@@ -271,6 +553,64 @@ def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
     registrarInteracao(pergunta, resposta, contexto_relevante, sessao_id)
     return resposta
 
+
+# ================================================================
+# TESTES DO VALIDADOR
+# ================================================================
+
+def testar_validador():
+    """
+    Função de teste para verificar se o validador está funcionando
+    """
+    print("\n" + "="*70)
+    print("🧪 TESTANDO VALIDADOR DE TÓPICOS PROIBIDOS")
+    print("="*70 + "\n")
+    
+    perguntas_teste = [
+        # Devem ser BLOQUEADAS
+        ("Qual CFOP usar para venda?", False),
+        ("Como calcular o ICMS?", False),
+        ("Qual o CST correto?", False),
+        ("Percentual de IPI é quanto?", False),
+        ("Posso vender sem nota fiscal?", False),
+        ("O que é qualificação 0?", False),
+        ("Como configurar CSOSN?", False),
+        ("Qual a alíquota de ICMS?", False),
+        ("Tributação de produtos", False),
+        ("PIS e COFINS qual o valor?", False),
+        
+        # Devem ser PERMITIDAS
+        ("Como cadastrar cliente?", True),
+        ("Como emitir nota fiscal?", True),
+        ("Imprimir relatório de vendas", True),
+        ("Cadastrar produto no sistema", True),
+        ("Como fazer backup?", True),
+        ("Configurar impressora fiscal", True),
+        ("Gerar relatório financeiro", True),
+        ("Como cancelar uma venda?", True)
+    ]
+    
+    acertos = 0
+    total = len(perguntas_teste)
+    
+    for pergunta, esperado_permitir in perguntas_teste:
+        validacao = validador.validar(pergunta)
+        resultado = validacao['permitido']
+        
+        if resultado == esperado_permitir:
+            status = "✅ PASS"
+            acertos += 1
+        else:
+            status = "❌ FAIL"
+        
+        print(f"{status} | {pergunta}")
+        if not resultado:
+            print(f"         └─ Bloqueado: {validacao['motivo']}")
+        print()
+    
+    print("="*70)
+    print(f"📊 RESULTADO: {acertos}/{total} testes passaram ({acertos/total*100:.1f}%)")
+    print("="*70)
 
 # ================================================================
 # SISTEMA DE MACHINE LEARNING (APRENDIZADO)

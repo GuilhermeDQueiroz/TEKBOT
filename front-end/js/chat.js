@@ -38,6 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     );
 
+    // Opcional: configurar o marked (padrões)
+    // Você pode ajustar opções aqui se quiser:
+    // marked.setOptions({ gfm: true, breaks: true });
+
     // ===============================================================
     // ==        2. FUNÇÕES DE GERENCIAMENTO DE SESSÕES             ==
     // ===============================================================
@@ -279,7 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 historico.forEach(interacao => {
                     appendMessage(interacao.pergunta, "right");
-                    appendMessage(interacao.resposta.replace(/\n/g, "<br>"), "left");
+                    // antes convertíamos \n -> <br>, agora deixamos o texto cru para o marked tratar que aceita quebras (opção breaks pode ser ativada)
+                    appendMessage(interacao.resposta, "left");
                 });
             }
         } catch (error) {
@@ -315,8 +320,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             chatEl.removeChild(digitandoEl);
-            const respostaFormatada = data.resposta.replace(/\n/g, "<br>");
-            appendMessage(respostaFormatada, "left");
+            // usar texto cru; marked fará o parsing do Markdown
+            appendMessage(data.resposta, "left");
 
         } catch (error) {
             console.error("Erro ao chamar a IA:", error);
@@ -640,7 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
     carregarSessoes();
 
 });
-
+  
 
 // ===============================================================
 // ==         FUNÇÕES GLOBAIS (FORA DO DOMContentLoaded)         ==
@@ -651,11 +656,27 @@ function appendMessage(message, side) {
     const wrapperHtml = `
     <div class="message-wrapper ${side}">
       ${side === "left" ? `<img class="avatar" src="../img/tekbot.png" alt="TekBot">` : ""}
-      <div class="message-bubble ${side}">${message}</div>
+      <div class="message-bubble ${side}">${/* aqui usaremos marked para converter Markdown */ ''}</div>
       ${side === "right" ? `<img class="avatar" src="../img/usuario.png" alt="Usuário">` : ""}
     </div>
   `;
+    // Inserimos o wrapper e depois preenchemos o conteúdo do bubble com marked
     chat.insertAdjacentHTML("beforeend", wrapperHtml);
+
+    // Pega o último elemento criado (mensagem)
+    const last = chat.lastElementChild;
+    if (last) {
+        const bubble = last.querySelector('.message-bubble');
+        try {
+            // Usamos marked.parse para transformar Markdown (ex: **negrito**) em HTML
+            bubble.innerHTML = marked.parse(String(message));
+        } catch (err) {
+            // Se algo der errado, mostramos o texto cru
+            console.error('Erro ao parsear Markdown:', err);
+            bubble.textContent = message;
+        }
+    }
+
     chat.scrollTop = chat.scrollHeight;
     return chat.lastElementChild;
 }
@@ -680,4 +701,34 @@ function appendTypingMessage() {
     chat.appendChild(wrapper);
     chat.scrollTop = chat.scrollHeight;
     return wrapper;
+}
+
+function appendMessage(message, side) {
+    const chat = document.getElementById("chat");
+    const wrapperHtml = `
+    <div class="message-wrapper ${side}">
+      ${side === "left" ? `<img class="avatar" src="../img/tekbot.png" alt="TekBot">` : ""}
+      <div class="message-bubble ${side}"></div>
+      ${side === "right" ? `<img class="avatar" src="../img/usuario.png" alt="Usuário">` : ""}
+    </div>
+  `;
+    // Inserimos o wrapper e depois preenchemos o conteúdo do bubble com marked
+    chat.insertAdjacentHTML("beforeend", wrapperHtml);
+
+    // Pega o último elemento criado (mensagem)
+    const last = chat.lastElementChild;
+    if (last) {
+        const bubble = last.querySelector('.message-bubble');
+        try {
+            // Usa marked.parse para transformar Markdown (ex: **negrito**) em HTML
+            bubble.innerHTML = marked.parse(String(message));
+        } catch (err) {
+            // Se algo der errado, mostramos o texto cru
+            console.error('Erro ao parsear Markdown:', err);
+            bubble.textContent = message;
+        }
+    }
+
+    chat.scrollTop = chat.scrollHeight;
+    return chat.lastElementChild;
 }

@@ -180,10 +180,10 @@ body {
   max-width: 80ch;
   word-wrap: break-word;
   overflow-wrap: break-word;
-  white-space: pre-wrap;
+  white-space: normal;
   font-family: 'Rubik', sans-serif;
   font-size: 0.95rem;
-  line-height: 1.5;
+  line-height: 1.3;
 }
 
 .message-bubble.right {
