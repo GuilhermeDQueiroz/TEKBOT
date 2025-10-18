@@ -1,12 +1,20 @@
 import os
 import torch
+import json
 import numpy as np
+import time
+import pickle
+import re
 from datetime import datetime, timezone
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 from sentence_transformers import SentenceTransformer
-from database import colecao_mensagens, colecao_interacoes
+from typing import Dict, List, Optional
+from collections import Counter
+from database import colecao_mensagens, colecao_interacoes, colecao_tickets, colecao_feedback_ia
 import google.generativeai as genai
-from typing import List, Dict, Optional
 
 # === Configuração de ambiente ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -25,6 +33,255 @@ print("[INFO] Carregando modelo de embeddings...")
 modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
 print("[OK] Modelo de embeddings carregado.")
 
+# === Diretório para modelos ML ===
+MODELO_DIR = "./modelos_ia"
+os.makedirs(MODELO_DIR, exist_ok=True)
+MODELO_PATH = os.path.join(MODELO_DIR, "modelo_prioridade.pkl")
+VECTORIZER_PATH = os.path.join(MODELO_DIR, "vectorizer.pkl")
+
+class ValidadorTopicosProibidos:
+    """
+    Sistema robusto para detectar e bloquear perguntas sobre 
+    tópicos fiscais, tributários e de qualificação
+    """
+    
+    def __init__(self):
+        # Padrões de detecção
+        self.padroes_cfop = [
+            r'\bcfop\b',
+            r'\bc\.?f\.?o\.?p\.?\b',
+            r'\bcódigo\s+fiscal\b',
+            r'\bcodigo\s+fiscal\b',
+            r'\boperaç[aã]o\s+fiscal\b',
+            r'\b[0-9]{4}\b.*\b(entrada|saída|venda|compra)\b'  # Ex: "5102 venda"
+        ]
+        
+        self.padroes_cst = [
+            r'\bcst\b',
+            r'\bc\.?s\.?t\.?\b',
+            r'\bcsosn\b',
+            r'\bc\.?s\.?o\.?s\.?n\.?\b',
+            r'\bcódigo\s+de\s+situa[cç][aã]o\s+tribut[aá]ria\b',
+            r'\bcodigo\s+de\s+situacao\s+tributaria\b',
+            r'\bsitua[cç][aã]o\s+tribut[aá]ria\b'
+        ]
+        
+        self.padroes_impostos = [
+            r'\bicms\b',
+            r'\bi\.?c\.?m\.?s\.?\b',
+            r'\bipi\b',
+            r'\bi\.?p\.?i\.?\b',
+            r'\bpis\b',
+            r'\bp\.?i\.?s\.?\b',
+            r'\bcofins\b',
+            r'\bc\.?o\.?f\.?i\.?n\.?s\.?\b',
+            r'\biss\b',
+            r'\bi\.?s\.?s\.?\b',
+            r'\bimposto\b',
+            r'\btribut[oaáã]\b',
+            r'\btributa[cç][aã]o\b',
+            r'\balíquota\b',
+            r'\baliquota\b',
+            r'\bregime\s+tribut[aá]rio\b'
+        ]
+        
+        # Contextos válidos que NÃO devem ser bloqueados
+        self.contextos_validos = [
+            r'\bemitir\s+nota\s*fiscal\b',
+            r'\bimprimir\s+nota\s*fiscal\b',
+            r'\bcancelar\s+nota\s*fiscal\b',
+            r'\bnota\s*fiscal\s+eletr[ôo]nica\b',
+            r'\bnfe\b',
+            r'\bnf-?e\b',
+            r'\bimpress[aã]o\s+fiscal\b',
+            r'\bimprimir\b.*\bfiscal\b',
+            r'\bconfigurar\s+impress\w+\s+fiscal\b',
+            r'\bcadastrar\b',
+            r'\bregistrar\b',
+            r'\brelat[oó]rio\b'
+        ]
+        
+        self.padroes_percentuais = [
+            r'\b\d+%\b.*\b(icms|ipi|pis|cofins|iss|imposto|tributo)\b',
+            r'\b(icms|ipi|pis|cofins|iss|imposto|tributo)\b.*\b\d+%\b',
+            r'\bpercentual\s+(de\s+)?(icms|ipi|pis|cofins|iss|imposto|tributo)\b',
+            r'\balíquota\s+de\b',
+            r'\baliquota\s+de\b',
+            r'\btaxa\s+de\s+(icms|ipi|pis|cofins|iss)\b'
+        ]
+        
+        self.padroes_sem_nota = [
+            r'\bsem\s+nota\b',
+            r'\bsem\s+n\.?f\.?\b',
+            r'\bsem\s+nota\s+fiscal\b',
+            r'\bnão\s+emitir\s+nota\b',
+            r'\bnao\s+emitir\s+nota\b',
+            r'\bvenda\s+sem\s+nota\b',
+            r'\bcompra\s+sem\s+nota\b'
+        ]
+        
+        self.padroes_qualificacao = [
+            r'\bqualifica[cç][aã]o\s+0\b',
+            r'\bqualifica[cç][aã]o\s+1\b',
+            r'\bqualifica[cç][aã]o\s+zero\b',
+            r'\bqualifica[cç][aã]o\s+um\b'
+        ]
+        
+        # Palavras-chave diretas
+        self.palavras_proibidas = {
+            'cfop', 'cst', 'csosn', 'icms', 'ipi', 'pis', 'cofins', 'iss',
+            'tributação', 'tributacao', 'alíquota', 'aliquota', 'sem nota',
+            'qualificação 0', 'qualificação 1', 'qualificacao 0', 'qualificacao 1'
+        }
+    
+    def validar(self, pergunta: str) -> Dict:
+        """
+        Valida se a pergunta contém tópicos proibidos
+        
+        Retorna:
+        {
+            'permitido': bool,
+            'motivo': str,
+            'categoria_bloqueio': str
+        }
+        """
+        pergunta_lower = pergunta.lower()
+        
+        # 🟢 PRIMEIRO: Verificar se está em contexto válido
+        for padrao_valido in self.contextos_validos:
+            if re.search(padrao_valido, pergunta_lower, re.IGNORECASE):
+                print(f"[VALIDAÇÃO] ✅ Contexto válido detectado - permitindo")
+                return {
+                    'permitido': True,
+                    'motivo': None,
+                    'categoria_bloqueio': None
+                }
+        
+        # 1. Verificação de CFOP
+        for padrao in self.padroes_cfop:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'CFOP (Código Fiscal de Operações e Prestações)',
+                    'categoria_bloqueio': 'fiscal'
+                }
+        
+        # 2. Verificação de CST/CSOSN
+        for padrao in self.padroes_cst:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'CST/CSOSN (Código de Situação Tributária)',
+                    'categoria_bloqueio': 'tributario'
+                }
+        
+        # 3. Verificação de Impostos
+        for padrao in self.padroes_impostos:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Impostos e Tributações (ICMS, IPI, PIS, COFINS, ISS)',
+                    'categoria_bloqueio': 'tributario'
+                }
+        
+        # 4. Verificação de Percentuais de Impostos
+        for padrao in self.padroes_percentuais:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Percentuais/Alíquotas de Impostos',
+                    'categoria_bloqueio': 'percentual_imposto'
+                }
+        
+        # 5. Verificação de "Sem Nota"
+        for padrao in self.padroes_sem_nota:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Operações sem Nota Fiscal',
+                    'categoria_bloqueio': 'sem_nota'
+                }
+        
+        # 6. Verificação de Qualificação 0 e 1
+        for padrao in self.padroes_qualificacao:
+            if re.search(padrao, pergunta_lower, re.IGNORECASE):
+                return {
+                    'permitido': False,
+                    'motivo': 'Qualificação 0 ou 1',
+                    'categoria_bloqueio': 'qualificacao'
+                }
+        
+        # 7. Verificação de palavras-chave diretas
+        for palavra in self.palavras_proibidas:
+            if palavra in pergunta_lower:
+                return {
+                    'permitido': False,
+                    'motivo': f'Termo proibido: {palavra.upper()}',
+                    'categoria_bloqueio': 'palavra_chave'
+                }
+        
+        # Pergunta permitida
+        return {
+            'permitido': True,
+            'motivo': None,
+            'categoria_bloqueio': None
+        }
+    
+    def gerar_mensagem_bloqueio(self, validacao: Dict) -> str:
+        """
+        Gera mensagem amigável explicando porque a pergunta foi bloqueada
+        """
+        motivo = validacao.get('motivo', 'tópico restrito')
+        categoria = validacao.get('categoria_bloqueio', '')
+        
+        mensagens = {
+            'fiscal': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Este assistente não fornece informações sobre questões fiscais e tributárias, pois:
+- São temas que exigem consultoria especializada de um contador
+- As regras variam conforme legislação específica de cada estado/município
+- Informações incorretas podem causar problemas legais e fiscais
+
+**📞 Recomendação:** Entre em contato com seu contador ou consultor fiscal para obter informações precisas e atualizadas.""",
+            
+            'tributario': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Questões tributárias devem ser tratadas por profissionais especializados:
+- Contador registrado no CRC
+- Consultor tributário
+- Departamento fiscal da sua empresa
+
+**💡 Dica:** Posso ajudar com outras funcionalidades do sistema ERP, como cadastros, emissão de documentos, relatórios, etc.""",
+            
+            'percentual_imposto': f"""🚫 Desculpe, não posso fornecer informações sobre **{motivo}**.
+
+Alíquotas e percentuais de impostos:
+- Variam conforme estado, município e tipo de produto/serviço
+- Mudam frequentemente conforme legislação
+- Exigem análise técnica de um contador
+
+**⚠️ Importante:** Consulte sempre seu contador para valores exatos e atualizados.""",
+            
+            'sem_nota': f"""🚫 Desculpe, não posso ajudar com questões sobre **{motivo}**.
+
+Todas as operações comerciais devem seguir a legislação fiscal vigente, incluindo a emissão de documentos fiscais apropriados.
+
+**📋 Lembre-se:** A emissão de notas fiscais é obrigatória por lei e essencial para a regularidade do seu negócio.""",
+            
+            'qualificacao': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Este é um tópico específico de configuração fiscal que requer orientação técnica especializada.
+
+**👨‍💼 Contate:** Seu contador ou consultor fiscal para esclarecimentos.""",
+            
+            'palavra_chave': f"""🚫 Desculpe, não posso responder sobre **{motivo}**.
+
+Para questões fiscais e tributárias, consulte sempre um profissional habilitado.
+
+**✅ Posso ajudar com:** Funcionalidades do sistema, cadastros, emissão de documentos, relatórios, processos operacionais, etc."""
+        }
+        
+        return mensagens.get(categoria, mensagens['palavra_chave'])
 
 # ==========================
 # CONTEXTO & HISTÓRICO
@@ -78,7 +335,7 @@ def obterUltimaResposta(sessao_id: str) -> Optional[str]:
 
 
 # ==========================
-# BUSCA RELEVANTE (mensagens + interações)
+# BUSCA RELEVANTE
 # ==========================
 def recuperarInfoRelevantes(pergunta: str, sessao_id: Optional[str] = None) -> List[Dict]:
     """Recupera documentos relevantes da base de conhecimento e interações anteriores"""
@@ -240,7 +497,42 @@ def registrarInteracao(pergunta: str, resposta: str, contexto: List, sessao_id: 
 # ==========================
 # PIPELINE COMPLETO
 # ==========================
+validador = ValidadorTopicosProibidos()
+
+
 def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
+    """
+    Pipeline completo de processamento com validação de tópicos proibidos
+    
+    MODIFICADO: Agora valida tópicos proibidos ANTES de processar
+    """
+    
+    # 🔒 VALIDAÇÃO DE TÓPICOS PROIBIDOS
+    validacao = validador.validar(pergunta)
+    
+    if not validacao['permitido']:
+        mensagem_bloqueio = validador.gerar_mensagem_bloqueio(validacao)
+        print(f"[VALIDAÇÃO] ❌ Pergunta bloqueada: {validacao['motivo']}")
+        
+        # Registra tentativa de pergunta proibida (opcional, para análise)
+        try:
+            from database import colecao_interacoes
+            from datetime import datetime, timezone
+            
+            colecao_interacoes.insert_one({
+                "tipo": "bloqueio",
+                "pergunta": pergunta,
+                "motivo_bloqueio": validacao['motivo'],
+                "categoria_bloqueio": validacao['categoria_bloqueio'],
+                "sessao_id": sessao_id,
+                "timestamp": datetime.now(timezone.utc)
+            })
+        except Exception as e:
+            print(f"[WARN] Não foi possível registrar bloqueio: {e}")
+        
+        return mensagem_bloqueio
+    
+    # ✅ PROCESSAMENTO NORMAL (código original)
     contexto_relevante = recuperarInfoRelevantes(pergunta, sessao_id)
     resposta = ""
 
@@ -248,7 +540,10 @@ def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
         pergunta_embedding = modelo_embedding.encode([pergunta]).reshape(1, -1)
         doc_top = contexto_relevante[0]
         doc_embedding = modelo_embedding.encode([doc_top["texto"]]).reshape(1, -1)
+        
+        from sklearn.metrics.pairwise import cosine_similarity
         similaridade = cosine_similarity(pergunta_embedding, doc_embedding)[0][0]
+        
         if similaridade > 0.9 and doc_top.get("resposta"):
             resposta = doc_top["resposta"]
             registrarInteracao(pergunta, resposta, [doc_top], sessao_id)
@@ -257,3 +552,1066 @@ def processarPergunta(pergunta: str, sessao_id: Optional[str] = None) -> str:
     resposta = gerarRespostaComIa(contexto_relevante, pergunta, sessao_id)
     registrarInteracao(pergunta, resposta, contexto_relevante, sessao_id)
     return resposta
+
+
+# ================================================================
+# TESTES DO VALIDADOR
+# ================================================================
+
+def testar_validador():
+    """
+    Função de teste para verificar se o validador está funcionando
+    """
+    print("\n" + "="*70)
+    print("🧪 TESTANDO VALIDADOR DE TÓPICOS PROIBIDOS")
+    print("="*70 + "\n")
+    
+    perguntas_teste = [
+        # Devem ser BLOQUEADAS
+        ("Qual CFOP usar para venda?", False),
+        ("Como calcular o ICMS?", False),
+        ("Qual o CST correto?", False),
+        ("Percentual de IPI é quanto?", False),
+        ("Posso vender sem nota fiscal?", False),
+        ("O que é qualificação 0?", False),
+        ("Como configurar CSOSN?", False),
+        ("Qual a alíquota de ICMS?", False),
+        ("Tributação de produtos", False),
+        ("PIS e COFINS qual o valor?", False),
+        
+        # Devem ser PERMITIDAS
+        ("Como cadastrar cliente?", True),
+        ("Como emitir nota fiscal?", True),
+        ("Imprimir relatório de vendas", True),
+        ("Cadastrar produto no sistema", True),
+        ("Como fazer backup?", True),
+        ("Configurar impressora fiscal", True),
+        ("Gerar relatório financeiro", True),
+        ("Como cancelar uma venda?", True)
+    ]
+    
+    acertos = 0
+    total = len(perguntas_teste)
+    
+    for pergunta, esperado_permitir in perguntas_teste:
+        validacao = validador.validar(pergunta)
+        resultado = validacao['permitido']
+        
+        if resultado == esperado_permitir:
+            status = "✅ PASS"
+            acertos += 1
+        else:
+            status = "❌ FAIL"
+        
+        print(f"{status} | {pergunta}")
+        if not resultado:
+            print(f"         └─ Bloqueado: {validacao['motivo']}")
+        print()
+    
+    print("="*70)
+    print(f"📊 RESULTADO: {acertos}/{total} testes passaram ({acertos/total*100:.1f}%)")
+    print("="*70)
+
+# ================================================================
+# SISTEMA DE MACHINE LEARNING (APRENDIZADO)
+# ================================================================
+
+class ModeloAprendizado:
+    """
+    Sistema de ML que aprende com tickets classificados e correções
+    """
+    
+    def __init__(self):
+        self.modelo = None
+        self.vectorizer = None
+        self.prioridades_map = {
+            'baixa': 0,
+            'media': 1,
+            'alta': 2,
+            'critica': 3
+        }
+        self.prioridades_reverse = {v: k for k, v in self.prioridades_map.items()}
+        self.carregado = False
+        self.metadados = None
+        
+    def carregar_modelo(self) -> bool:
+        """Carrega modelo já treinado"""
+        try:
+            if os.path.exists(MODELO_PATH) and os.path.exists(VECTORIZER_PATH):
+                with open(MODELO_PATH, 'rb') as f:
+                    self.modelo = pickle.load(f)
+                with open(VECTORIZER_PATH, 'rb') as f:
+                    self.vectorizer = pickle.load(f)
+                
+                # Carregar metadados
+                metadados_path = os.path.join(MODELO_DIR, 'metadados.pkl')
+                if os.path.exists(metadados_path):
+                    with open(metadados_path, 'rb') as f:
+                        self.metadados = pickle.load(f)
+                
+                self.carregado = True
+                print("[ML] ✅ Modelo carregado!")
+                return True
+            else:
+                print("[ML] ⚠️ Nenhum modelo encontrado. Execute: python retreinar_modelo.py")
+                return False
+        except Exception as e:
+            print(f"[ML] ❌ Falha ao carregar: {e}")
+            return False
+    
+    def preparar_dados_treino(self) -> tuple:
+        """Busca tickets do banco para treinar"""
+        print("[ML] 📊 Buscando dados de treino...")
+        
+        # 1. Tickets CORRIGIDOS (fonte mais confiável)
+        tickets_corrigidos = list(colecao_tickets.find({
+            "foi_corrigido": True,
+            "prioridade_corrigida_atendente": {"$exists": True}
+        }))
+        
+        # 2. Tickets RESOLVIDOS (sem correção = IA acertou)
+        tickets_resolvidos = list(colecao_tickets.find({
+            "status": {"$in": ["resolvido", "fechado"]},
+            "foi_corrigido": {"$ne": True},
+            "prioridade": {"$exists": True}
+        }).limit(500))
+        
+        print(f"[ML]    Corrigidos: {len(tickets_corrigidos)}")
+        print(f"[ML]    Resolvidos: {len(tickets_resolvidos)}")
+        
+        total = len(tickets_corrigidos) + len(tickets_resolvidos)
+        
+        if total < 20:
+            print(f"[ML] ⚠️ Mínimo 20 tickets necessários (atual: {total})")
+            return None, None, None
+        
+        textos = []
+        categorias = []
+        prioridades = []
+        
+        # Priorizar correções
+        for ticket in tickets_corrigidos:
+            texto = f"{ticket['titulo']} {ticket['descricao']}"
+            textos.append(texto)
+            categorias.append(ticket.get('categoria', 'outro'))
+            prioridades.append(ticket['prioridade_corrigida_atendente'])
+        
+        for ticket in tickets_resolvidos:
+            texto = f"{ticket['titulo']} {ticket['descricao']}"
+            textos.append(texto)
+            categorias.append(ticket.get('categoria', 'outro'))
+            prioridades.append(ticket['prioridade'])
+        
+        # Distribuição
+        dist = Counter(prioridades)
+        print(f"[ML] 📈 Distribuição:")
+        for prio in ['baixa', 'media', 'alta', 'critica']:
+            count = dist.get(prio, 0)
+            print(f"       {prio}: {count}")
+        
+        return textos, categorias, prioridades
+    
+    def treinar(self, force=False):
+        """Treina o modelo"""
+        print("\n" + "="*70)
+        print("🧠 TREINANDO MODELO DE MACHINE LEARNING")
+        print("="*70)
+        
+        if not force and os.path.exists(MODELO_PATH):
+            print("\n⚠️  Modelo já existe.")
+            return False
+        
+        textos, categorias, prioridades = self.preparar_dados_treino()
+        
+        if textos is None:
+            return False
+        
+        # Converter para números
+        y = np.array([self.prioridades_map[p] for p in prioridades])
+        
+        # Features
+        print("\n[ML] 🔧 Criando features...")
+        
+        self.vectorizer = TfidfVectorizer(
+            max_features=500,
+            ngram_range=(1, 2),
+            min_df=2
+        )
+        
+        X_texto = self.vectorizer.fit_transform(textos)
+        
+        # One-hot para categoria
+        categorias_unicas = list(set(categorias))
+        X_cat = np.zeros((len(categorias), len(categorias_unicas)))
+        for i, cat in enumerate(categorias):
+            if cat in categorias_unicas:
+                X_cat[i, categorias_unicas.index(cat)] = 1
+        
+        X = np.hstack([X_texto.toarray(), X_cat])
+        
+        print(f"[ML]    Shape: {X.shape}")
+        
+        # Treino/teste
+        if len(textos) >= 40:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+        else:
+            X_train, y_train = X, y
+            X_test, y_test = X, y
+        
+        # Treinar
+        print("\n[ML] 🎯 Treinando Random Forest...")
+        
+        self.modelo = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42,
+            class_weight='balanced'
+        )
+        
+        self.modelo.fit(X_train, y_train)
+        
+        # Avaliar
+        score_treino = self.modelo.score(X_train, y_train)
+        score_teste = self.modelo.score(X_test, y_test)
+        
+        print(f"\n[ML] 📊 Resultados:")
+        print(f"       Treino: {score_treino:.1%}")
+        print(f"       Teste: {score_teste:.1%}")
+        
+        # Salvar
+        print(f"\n[ML] 💾 Salvando modelo...")
+        
+        with open(MODELO_PATH, 'wb') as f:
+            pickle.dump(self.modelo, f)
+        
+        with open(VECTORIZER_PATH, 'wb') as f:
+            pickle.dump(self.vectorizer, f)
+        
+        metadados = {
+            'treinado_em': datetime.now(timezone.utc).isoformat(),
+            'num_exemplos': len(textos),
+            'acuracia_treino': float(score_treino),
+            'acuracia_teste': float(score_teste),
+            'distribuicao': dict(Counter(prioridades)),
+            'categorias_unicas': categorias_unicas
+        }
+        
+        with open(os.path.join(MODELO_DIR, 'metadados.pkl'), 'wb') as f:
+            pickle.dump(metadados, f)
+        
+        self.metadados = metadados
+        self.carregado = True
+        
+        print(f"[ML] ✅ Modelo salvo!")
+        print("="*70)
+        
+        return True
+    
+    def prever(self, titulo: str, descricao: str, categoria: str) -> Optional[Dict]:
+        """Prediz prioridade"""
+        if not self.carregado:
+            if not self.carregar_modelo():
+                return None
+        
+        try:
+            texto = f"{titulo} {descricao}"
+            X_texto = self.vectorizer.transform([texto])
+            
+            categorias_unicas = self.metadados['categorias_unicas']
+            X_cat = np.zeros((1, len(categorias_unicas)))
+            if categoria in categorias_unicas:
+                X_cat[0, categorias_unicas.index(categoria)] = 1
+            
+            X = np.hstack([X_texto.toarray(), X_cat])
+            
+            prioridade_num = self.modelo.predict(X)[0]
+            probabilidades = self.modelo.predict_proba(X)[0]
+            
+            prioridade = self.prioridades_reverse[prioridade_num]
+            confianca = float(probabilidades[prioridade_num]) * 100
+            
+            urgencias = {'baixa': 2, 'media': 5, 'alta': 8, 'critica': 10}
+            
+            return {
+                'prioridade': prioridade,
+                'urgencia': urgencias[prioridade],
+                'confianca': confianca,
+                'metodo': 'modelo_ml',
+                'probabilidades': {
+                    self.prioridades_reverse[i]: float(prob)
+                    for i, prob in enumerate(probabilidades)
+                }
+            }
+            
+        except Exception as e:
+            print(f"[ML] ❌ Erro ao prever: {e}")
+            return None
+    
+    def verificar_retreino(self) -> bool:
+        """Verifica se precisa retreinar"""
+        if not self.metadados:
+            return False
+        
+        try:
+            data_treino = datetime.fromisoformat(self.metadados['treinado_em'])
+            
+            novas_correcoes = colecao_tickets.count_documents({
+                "foi_corrigido": True,
+                "corrigido_em": {"$gt": data_treino}
+            })
+            
+            if novas_correcoes >= 20:
+                print(f"[ML] ⚠️ {novas_correcoes} novas correções - retreino recomendado!")
+                return True
+            
+            return False
+            
+        except:
+            return False
+
+
+# Instância global
+modelo_ml = ModeloAprendizado()
+
+
+# ================================================================
+# SISTEMA DE FEEDBACK (APRENDIZADO)
+# ================================================================
+
+def registrar_correcao_atendente(
+    ticket_id: str,
+    prioridade_corrigida: str,
+    atendente_email: str,
+    motivo: str = None
+):
+    """Registra correção de atendente"""
+    from bson import ObjectId
+    
+    ticket = colecao_tickets.find_one({"_id": ObjectId(ticket_id)})
+    
+    if not ticket:
+        print(f"[FEEDBACK] ❌ Ticket {ticket_id} não encontrado")
+        return False
+    
+    prioridade_original = ticket.get('prioridade')
+    
+    if prioridade_original == prioridade_corrigida:
+        print(f"[FEEDBACK] ℹ️ Prioridade já está correta")
+        return False
+    
+    # Atualizar ticket
+    colecao_tickets.update_one(
+        {"_id": ObjectId(ticket_id)},
+        {
+            "$set": {
+                "prioridade_original_ia": prioridade_original,
+                "prioridade_corrigida_atendente": prioridade_corrigida,
+                "prioridade": prioridade_corrigida,
+                "foi_corrigido": True,
+                "corrigido_por": atendente_email,
+                "corrigido_em": datetime.now(timezone.utc),
+                "motivo_correcao": motivo
+            }
+        }
+    )
+    
+    # Registrar feedback
+    feedback = {
+        "ticket_id": ticket_id,
+        "ticket_numero": ticket.get('numero_ticket'),
+        "titulo": ticket.get('titulo'),
+        "descricao": ticket.get('descricao'),
+        "categoria": ticket.get('categoria'),
+        "prioridade_ia": prioridade_original,
+        "prioridade_correta": prioridade_corrigida,
+        "atendente": atendente_email,
+        "motivo": motivo,
+        "metodo_usado": ticket.get('analise_ia', {}).get('metodo_usado'),
+        "registrado_em": datetime.now(timezone.utc)
+    }
+    
+    colecao_feedback_ia.insert_one(feedback)
+    
+    print(f"[FEEDBACK] ✅ Correção registrada:")
+    print(f"           #{ticket.get('numero_ticket')}: {prioridade_original} → {prioridade_corrigida}")
+    
+    # Verificar se precisa retreinar
+    if modelo_ml.verificar_retreino():
+        print(f"[FEEDBACK] 🔄 Execute: python retreinar_modelo.py")
+    
+    return True
+
+
+def obter_estatisticas_feedback():
+    """Estatísticas de feedback"""
+    total_correcoes = colecao_tickets.count_documents({"foi_corrigido": True})
+    total_tickets = colecao_tickets.count_documents({})
+    
+    if total_tickets == 0:
+        print("\n[FEEDBACK] ⚠️ Nenhum ticket no banco")
+        return
+    
+    taxa_acerto = ((total_tickets - total_correcoes) / total_tickets) * 100
+    
+    print("\n" + "="*70)
+    print("📊 ESTATÍSTICAS DE APRENDIZADO")
+    print("="*70)
+    print(f"\n✅ Taxa de acerto: {taxa_acerto:.1f}%")
+    print(f"📊 Total: {total_tickets} tickets")
+    print(f"🔧 Correções: {total_correcoes}")
+    
+    # Erros comuns
+    erros = list(colecao_tickets.find({
+        "foi_corrigido": True,
+        "prioridade_original_ia": {"$exists": True}
+    }).limit(10))
+    
+    if erros:
+        print(f"\n🔄 Erros mais recentes:")
+        transicoes = []
+        for erro in erros:
+            trans = f"{erro['prioridade_original_ia']} → {erro['prioridade_corrigida_atendente']}"
+            transicoes.append(trans)
+        
+        counter = Counter(transicoes)
+        for trans, count in counter.most_common(5):
+            print(f"   {trans}: {count}x")
+
+
+# ================================================================
+# SISTEMA DE PRIORIZAÇÃO COM 4 CAMADAS (REGRAS + CACHE + ML + IA)
+# ================================================================
+
+class AnalisadorPrioridadeAvancado:
+    """Sistema de 4 camadas com aprendizado"""
+    
+    # PALAVRAS-CHAVE CRÍTICAS
+    PALAVRAS_CRITICAS_SISTEMA_PARADO = [
+        'sistema parado', 'sistema travado', 'sistema caiu', 'sistema down',
+        'sistema fora do ar', 'sistema não abre', 'sistema não inicia',
+        'não consigo acessar nada', 'tudo parado', 'completamente parado',
+        'nada funciona', 'sistema travou completamente'
+    ]
+    
+    PALAVRAS_CRITICAS_DADOS = [
+        'perda de dados', 'dados perdidos', 'backup falhou',
+        'banco de dados inacessível', 'banco caiu', 'dados corrompidos'
+    ]
+    
+    PALAVRAS_CRITICAS_PRODUCAO = [
+        'produção parada', 'fábrica parada', 'linha de produção parada',
+        'operação completamente bloqueada', 'empresa parada'
+    ]
+    
+    PALAVRAS_CRITICAS_SEGURANCA = [
+        'invasão', 'hackeado', 'dados vazados', 'vulnerabilidade crítica'
+    ]
+    
+    # PALAVRAS ALTA
+    PALAVRAS_ALTAS_ERRO = [
+        'erro grave', 'erro crítico', 'bug grave', 'bug crítico',
+        'falha grave', 'exception', 'crash'
+    ]
+    
+    PALAVRAS_ALTAS_FUNCIONALIDADE = [
+        'não salva', 'não gera', 'não processa', 'não emite',
+        'não importa', 'não exporta'
+    ]
+    
+    PALAVRAS_ALTAS_MULTIPLOS = [
+        'todos os usuários', 'todos usuários', 'ninguém consegue',
+        'departamento inteiro', 'equipe inteira', 'time inteiro'
+    ]
+    
+    # PALAVRAS MÉDIA
+    PALAVRAS_MEDIAS = [
+        'problema', 'dificuldade', 'erro', 'falha',
+        'lento', 'demora', 'travando às vezes'
+    ]
+    
+    # PALAVRAS BAIXA
+    PALAVRAS_BAIXAS_DUVIDA = [
+        'como faço', 'como fazer', 'como eu', 'dúvida',
+        'não sei', 'poderia me ajudar', 'gostaria de saber'
+    ]
+    
+    PALAVRAS_BAIXAS_SUGESTAO = [
+        'sugestão', 'melhoria', 'poderia ter', 'seria bom',
+        'seria legal', 'gostaria que', 'sugiro'
+    ]
+    
+    @staticmethod
+    def analisar_por_regras(titulo: str, descricao: str, categoria: str) -> Dict:
+        """CAMADA 1: Regras determinísticas"""
+        texto_completo = f"{titulo} {descricao}".lower()
+        titulo_lower = titulo.lower()
+        descricao_lower = descricao.lower()
+        
+        # CRÍTICO
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_SISTEMA_PARADO:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'critica',
+                    'urgencia': 10,
+                    'impacto': 'critico',
+                    'confianca': 100,
+                    'metodo': 'regra_critica_sistema',
+                    'justificativa': f'Sistema parado: "{palavra}"',
+                    'requer_atencao_imediata': True,
+                    'tempo_estimado_resolucao': '15-30 minutos'
+                }
+        
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_DADOS:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'critica',
+                    'urgencia': 10,
+                    'impacto': 'critico',
+                    'confianca': 100,
+                    'metodo': 'regra_critica_dados',
+                    'justificativa': f'Dados críticos: "{palavra}"',
+                    'requer_atencao_imediata': True,
+                    'tempo_estimado_resolucao': '30-60 minutos'
+                }
+        
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_PRODUCAO:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'critica',
+                    'urgencia': 10,
+                    'impacto': 'critico',
+                    'confianca': 100,
+                    'metodo': 'regra_critica_producao',
+                    'justificativa': f'Produção parada: "{palavra}"',
+                    'requer_atencao_imediata': True,
+                    'tempo_estimado_resolucao': '15-30 minutos'
+                }
+        
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_CRITICAS_SEGURANCA:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'critica',
+                    'urgencia': 10,
+                    'impacto': 'critico',
+                    'confianca': 100,
+                    'metodo': 'regra_critica_seguranca',
+                    'justificativa': f'Segurança: "{palavra}"',
+                    'requer_atencao_imediata': True,
+                    'tempo_estimado_resolucao': '30-60 minutos'
+                }
+        
+        # ALTA
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_ERRO:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'alta',
+                    'urgencia': 8,
+                    'impacto': 'alto',
+                    'confianca': 85,
+                    'metodo': 'regra_alta_erro',
+                    'justificativa': f'Erro grave: "{palavra}"',
+                    'tempo_estimado_resolucao': '1-2 horas'
+                }
+        
+        funcionalidade_alta = any(p in texto_completo for p in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_FUNCIONALIDADE)
+        if funcionalidade_alta:
+            return {
+                'prioridade': 'alta',
+                'urgencia': 7,
+                'impacto': 'alto',
+                'confianca': 85,
+                'metodo': 'regra_alta_funcionalidade',
+                'justificativa': 'Funcionalidade importante quebrada',
+                'tempo_estimado_resolucao': '2-4 horas'
+            }
+        
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_ALTAS_MULTIPLOS:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'alta',
+                    'urgencia': 8,
+                    'impacto': 'alto',
+                    'confianca': 90,
+                    'metodo': 'regra_alta_multiplos',
+                    'justificativa': f'Múltiplos usuários: "{palavra}"',
+                    'tempo_estimado_resolucao': '1-2 horas'
+                }
+        
+        # BUG
+        if categoria and categoria.lower() == 'bug':
+            if any(p in texto_completo for p in ['grave', 'crítico', 'sério', 'importante']):
+                return {
+                    'prioridade': 'alta',
+                    'urgencia': 7,
+                    'impacto': 'alto',
+                    'confianca': 80,
+                    'metodo': 'regra_bug_grave',
+                    'justificativa': 'Bug grave',
+                    'tempo_estimado_resolucao': '2-4 horas'
+                }
+            else:
+                return {
+                    'prioridade': 'media',
+                    'urgencia': 5,
+                    'impacto': 'medio',
+                    'confianca': 75,
+                    'metodo': 'regra_bug_medio',
+                    'justificativa': 'Bug sem gravidade clara',
+                    'tempo_estimado_resolucao': '4-8 horas'
+                }
+        
+        # BAIXA (verificar ANTES de média)
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_BAIXAS_DUVIDA:
+            if palavra in titulo_lower or palavra in descricao_lower[:100]:
+                return {
+                    'prioridade': 'baixa',
+                    'urgencia': 2,
+                    'impacto': 'baixo',
+                    'confianca': 85,
+                    'metodo': 'regra_baixa_duvida',
+                    'justificativa': 'Dúvida sobre uso',
+                    'tempo_estimado_resolucao': '1-2 horas'
+                }
+        
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_BAIXAS_SUGESTAO:
+            if palavra in titulo_lower or palavra in descricao_lower[:100]:
+                return {
+                    'prioridade': 'baixa',
+                    'urgencia': 2,
+                    'impacto': 'baixo',
+                    'confianca': 90,
+                    'metodo': 'regra_baixa_sugestao',
+                    'justificativa': 'Sugestão (não urgente)',
+                    'tempo_estimado_resolucao': '24-48 horas'
+                }
+        
+        if categoria and categoria.lower() in ['duvida', 'feature', 'outro']:
+            return {
+                'prioridade': 'baixa',
+                'urgencia': 3,
+                'impacto': 'baixo',
+                'confianca': 80,
+                'metodo': 'regra_categoria_baixa',
+                'justificativa': f'Categoria "{categoria}" - baixa urgência',
+                'tempo_estimado_resolucao': '4-24 horas'
+            }
+        
+        # MÉDIA
+        for palavra in AnalisadorPrioridadeAvancado.PALAVRAS_MEDIAS:
+            if palavra in texto_completo:
+                return {
+                    'prioridade': 'media',
+                    'urgencia': 5,
+                    'impacto': 'medio',
+                    'confianca': 70,
+                    'metodo': 'regra_media',
+                    'justificativa': f'Problema moderado: "{palavra}"',
+                    'tempo_estimado_resolucao': '4-8 horas'
+                }
+        
+        # CAIXA ALTA
+        if len(titulo) > 5 and sum(1 for c in titulo if c.isupper()) > len(titulo) * 0.7:
+            tem_critica = any(p in titulo_lower for p in ['parado', 'travado', 'caiu'])
+            if tem_critica:
+                return {
+                    'prioridade': 'critica',
+                    'urgencia': 9,
+                    'impacto': 'critico',
+                    'confianca': 90,
+                    'metodo': 'regra_caixa_alta_critica',
+                    'justificativa': 'CAIXA ALTA + palavra crítica',
+                    'tempo_estimado_resolucao': '15-30 minutos'
+                }
+            else:
+                return {
+                    'prioridade': 'alta',
+                    'urgencia': 7,
+                    'impacto': 'alto',
+                    'confianca': 60,
+                    'metodo': 'regra_caixa_alta',
+                    'justificativa': 'CAIXA ALTA = urgência',
+                    'tempo_estimado_resolucao': '1-2 horas'
+                }
+        
+        # EXCLAMAÇÕES
+        if texto_completo.count('!') >= 3:
+            return {
+                'prioridade': 'alta',
+                'urgencia': 7,
+                'impacto': 'alto',
+                'confianca': 55,
+                'metodo': 'regra_exclamacoes',
+                'justificativa': 'Múltiplas exclamações',
+                'tempo_estimado_resolucao': '1-2 horas'
+            }
+        
+        # PADRÃO
+        return {
+            'prioridade': 'media',
+            'urgencia': 5,
+            'impacto': 'medio',
+            'confianca': 40,
+            'metodo': 'padrao',
+            'justificativa': 'Sem padrão claro',
+            'tempo_estimado_resolucao': '4-8 horas'
+        }
+    
+    @staticmethod
+    def calcular_score(prioridade: str, urgencia: int, tempo_espera_minutos: float = 0) -> int:
+        """Calcula score para fila"""
+        base_scores = {
+            'critica': 10000,
+            'alta': 5000,
+            'media': 1000,
+            'baixa': 100
+        }
+        
+        score = base_scores.get(prioridade, 1000)
+        score += urgencia * 100
+        score += min(tempo_espera_minutos, 1440) * 0.5
+        
+        return int(score)
+
+
+def buscar_tickets_similares(titulo: str, descricao: str, limite: int = 5) -> List[Dict]:
+    """CAMADA 2: Cache de tickets similares"""
+    try:
+        texto_busca = f"{titulo} {descricao}"
+        embedding_busca = modelo_embedding.encode([texto_busca])[0].reshape(1, -1)
+        
+        tickets = list(colecao_tickets.find({
+            "embedding": {"$exists": True},
+            "status": {"$in": ["resolvido", "fechado"]}
+        }).limit(100))
+        
+        if not tickets:
+            return []
+        
+        tickets_similares = []
+        for ticket in tickets:
+            if "embedding" not in ticket or not ticket["embedding"]:
+                continue
+                
+            ticket_embedding = np.array(ticket["embedding"]).reshape(1, -1)
+            similaridade = cosine_similarity(embedding_busca, ticket_embedding)[0][0]
+            
+            if similaridade > 0.70:
+                tickets_similares.append({
+                    "ticket": ticket,
+                    "similaridade": float(similaridade)
+                })
+        
+        tickets_similares.sort(key=lambda x: x["similaridade"], reverse=True)
+        return tickets_similares[:limite]
+        
+    except Exception as e:
+        print(f"[CACHE] ❌ Erro: {e}")
+        return []
+
+
+def analisar_ticket_com_ia(titulo: str, descricao: str, categoria: Optional[str] = None) -> Dict:
+    """CAMADA 4: IA Gemini (último recurso)"""
+    
+    prompt = f"""
+Você é especialista em triagem de tickets ERP.
+
+**TICKET:**
+Título: {titulo}
+Descrição: {descricao}
+Categoria: {categoria or "Não informada"}
+
+**CRITÉRIOS:**
+🔴 CRÍTICA: Sistema parado, dados perdidos, segurança comprometida
+🟠 ALTA: Funcionalidade importante quebrada, múltiplos usuários afetados
+🟡 MÉDIA: Problemas moderados, workaround disponível
+🟢 BAIXA: Dúvidas, sugestões, problemas cosméticos
+
+Retorne JSON:
+{{
+  "prioridade": "critica|alta|media|baixa",
+  "urgencia": 1-10,
+  "impacto": "critico|alto|medio|baixo",
+  "justificativa": "por que essa prioridade",
+  "tempo_estimado_resolucao": "ex: 1-2 horas"
+}}
+"""
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        response = model.generate_content(prompt, generation_config={"temperature": 0.1})
+        response_text = response.text.strip()
+        
+        if response_text.startswith("```"):
+            response_text = response_text.replace("```json", "").replace("```", "").strip()
+        
+        analise = json.loads(response_text)
+        
+        # Validação
+        texto_completo = f"{titulo} {descricao}".lower()
+        palavras_criticas = ["parado", "travado", "não funciona", "caiu", "fora do ar"]
+        
+        if any(p in texto_completo for p in palavras_criticas):
+            if analise.get("prioridade") not in ["critica", "alta"]:
+                analise["prioridade"] = "critica"
+                analise["urgencia"] = 10
+        
+        return analise
+        
+    except Exception as e:
+        print(f"[IA] ❌ Erro: {e}")
+        return {
+            "prioridade": "media",
+            "urgencia": 5,
+            "impacto": "medio",
+            "erro": str(e)
+        }
+
+
+def analisar_prioridade_hibrido(
+    titulo: str,
+    descricao: str,
+    categoria: str,
+    usar_ia: bool = True,
+    usar_cache: bool = True,
+    usar_ml: bool = True
+) -> Dict:
+    """
+    🧠 SISTEMA COM 4 CAMADAS (+ APRENDIZADO):
+    
+    1. REGRAS (0-5ms) - Padrões fixos
+    2. CACHE (10-50ms) - Tickets similares
+    3. ML (50-100ms) - 🆕 APRENDE COM FEEDBACK!
+    4. IA Gemini (1-3s) - Último recurso
+    """
+    
+    print(f"\n[PRIORIZAÇÃO] Analisando...")
+    tempo_inicio = time.time()
+    
+    # CAMADA 1: REGRAS
+    analise_regras = AnalisadorPrioridadeAvancado.analisar_por_regras(titulo, descricao, categoria)
+    print(f"  ✓ Regras: {analise_regras['prioridade'].upper()} ({analise_regras['confianca']}%)")
+    
+    if analise_regras['confianca'] >= 85:
+        tempo_total = int((time.time() - tempo_inicio) * 1000)
+        score = AnalisadorPrioridadeAvancado.calcular_score(
+            analise_regras['prioridade'],
+            analise_regras['urgencia']
+        )
+        return {
+            **analise_regras,
+            'score': score,
+            'tempo_processamento_ms': tempo_total,
+            'analise_ia': None
+        }
+    
+    # CAMADA 2: CACHE
+    if usar_cache:
+        try:
+            print(f"  🔍 Cache...")
+            similares = buscar_tickets_similares(titulo, descricao, limite=3)
+            
+            if similares and similares[0]['similaridade'] > 0.90:
+                ticket_similar = similares[0]['ticket']
+                tempo_total = int((time.time() - tempo_inicio) * 1000)
+                
+                print(f"  ✓ Cache hit! ({tempo_total}ms)")
+                
+                prioridade = ticket_similar.get('prioridade', 'media')
+                urgencia = ticket_similar.get('analise_ia', {}).get('urgencia', 5)
+                score = AnalisadorPrioridadeAvancado.calcular_score(prioridade, urgencia)
+                
+                return {
+                    'prioridade': prioridade,
+                    'urgencia': urgencia,
+                    'impacto': ticket_similar.get('analise_ia', {}).get('impacto', 'medio'),
+                    'score': score,
+                    'confianca': 95,
+                    'metodo': 'cache_similar',
+                    'justificativa': f"Similar a #{ticket_similar.get('numero_ticket', 'N/A')}",
+                    'tempo_estimado_resolucao': ticket_similar.get('analise_ia', {}).get('tempo_estimado_resolucao', 'A definir'),
+                    'tempo_processamento_ms': tempo_total,
+                    'analise_ia': None
+                }
+        except Exception as e:
+            print(f"  ⚠️ Cache: {e}")
+    
+    # CAMADA 3: MODELO ML (APRENDIZADO!) 🆕
+    if usar_ml:
+        try:
+            print(f"  🤖 ML...")
+            predicao = modelo_ml.prever(titulo, descricao, categoria)
+            
+            if predicao and predicao['confianca'] >= 70:
+                tempo_total = int((time.time() - tempo_inicio) * 1000)
+                
+                print(f"  ✓ ML: {predicao['prioridade'].upper()} ({predicao['confianca']:.0f}%) em {tempo_total}ms")
+                
+                score = AnalisadorPrioridadeAvancado.calcular_score(
+                    predicao['prioridade'],
+                    predicao['urgencia']
+                )
+                
+                return {
+                    'prioridade': predicao['prioridade'],
+                    'urgencia': predicao['urgencia'],
+                    'impacto': {'baixa': 'baixo', 'media': 'medio', 'alta': 'alto', 'critica': 'critico'}[predicao['prioridade']],
+                    'score': score,
+                    'confianca': predicao['confianca'],
+                    'metodo': 'modelo_ml_aprendizado',
+                    'justificativa': f"ML treinado ({predicao['confianca']:.0f}% confiança)",
+                    'tempo_estimado_resolucao': 'Baseado em histórico',
+                    'tempo_processamento_ms': tempo_total,
+                    'probabilidades_ml': predicao['probabilidades'],
+                    'analise_ia': None
+                }
+        except Exception as e:
+            print(f"  ⚠️ ML: {e}")
+    
+    # CAMADA 4: IA GEMINI
+    if usar_ia:
+        try:
+            print(f"  🤖 IA Gemini...")
+            analise_ia = analisar_ticket_com_ia(titulo, descricao, categoria)
+            
+            tempo_total = int((time.time() - tempo_inicio) * 1000)
+            print(f"  ✓ IA: {tempo_total}ms")
+            
+            prioridade_final = analise_ia.get('prioridade', 'media')
+            
+            # Validação com regras
+            if analise_regras['prioridade'] == 'critica' and prioridade_final not in ['critica', 'alta']:
+                prioridade_final = 'critica'
+                analise_ia['urgencia'] = 10
+            
+            score = AnalisadorPrioridadeAvancado.calcular_score(
+                prioridade_final,
+                analise_ia.get('urgencia', 5)
+            )
+            
+            return {
+                'prioridade': prioridade_final,
+                'urgencia': analise_ia.get('urgencia', 5),
+                'impacto': analise_ia.get('impacto', 'medio'),
+                'score': score,
+                'confianca': 95,
+                'metodo': 'ia_gemini',
+                'justificativa': analise_ia.get('justificativa', ''),
+                'tempo_estimado_resolucao': analise_ia.get('tempo_estimado_resolucao', 'A definir'),
+                'tempo_processamento_ms': tempo_total,
+                'analise_ia': analise_ia
+            }
+        except Exception as e:
+            print(f"  ❌ IA: {e}")
+    
+    # FALLBACK
+    tempo_total = int((time.time() - tempo_inicio) * 1000)
+    score = AnalisadorPrioridadeAvancado.calcular_score(
+        analise_regras['prioridade'],
+        analise_regras['urgencia']
+    )
+    
+    return {
+        **analise_regras,
+        'score': score,
+        'metodo': 'regras_fallback',
+        'tempo_processamento_ms': tempo_total,
+        'analise_ia': None
+    }
+
+
+# FUNÇÃO LEGACY (compatibilidade)
+def calcular_prioridade_inteligente(titulo: str, descricao: str, categoria: str, usar_ia: bool = True, cliente_email: Optional[str] = None) -> Dict:
+    """Compatibilidade com código antigo"""
+    resultado = analisar_prioridade_hibrido(titulo, descricao, categoria, usar_ia=usar_ia)
+    
+    similares = buscar_tickets_similares(titulo, descricao, limite=3)
+    resultado['tickets_similares'] = similares
+    
+    recomendacoes = []
+    if resultado['prioridade'] in ['critica', 'alta']:
+        recomendacoes.append("⚠️ Prioridade!")
+    
+    if similares:
+        tempos = [s['ticket'].get('tempo_resolucao_minutos', 0) for s in similares if s['ticket'].get('tempo_resolucao_minutos')]
+        if tempos:
+            tempo_medio = sum(tempos) / len(tempos)
+            recomendacoes.append(f"📊 ~{int(tempo_medio)} min (histórico)")
+    
+    if cliente_email:
+        try:
+            from database import colecao_usuarios
+            usuario = colecao_usuarios.find_one({"email": cliente_email})
+            if usuario and usuario.get("tipo_usuario") == "vip":
+                resultado['score'] += 2000
+                recomendacoes.append("⭐ Cliente VIP")
+        except:
+            pass
+    
+    resultado['recomendacoes'] = recomendacoes
+    return resultado
+
+
+def adicionar_embedding_ao_ticket(ticket_id: str, titulo: str, descricao: str):
+    """Adiciona embedding ao ticket"""
+    try:
+        from bson import ObjectId
+        texto = f"{titulo} {descricao}"
+        embedding = modelo_embedding.encode([texto])[0].tolist()
+        
+        colecao_tickets.update_one(
+            {"_id": ObjectId(ticket_id)},
+            {"$set": {"embedding": embedding}}
+        )
+        
+        print(f"[EMBEDDING] ✅ Adicionado ao ticket {ticket_id[:8]}...")
+        
+    except Exception as e:
+        print(f"[EMBEDDING] ❌ Erro: {e}")
+
+
+def gerar_resposta_automatica_ticket(ticket: Dict) -> Optional[str]:
+    """Resposta automática baseada em similares"""
+    similares = buscar_tickets_similares(ticket["titulo"], ticket["descricao"], limite=3)
+    
+    if not similares or similares[0]["similaridade"] < 0.85:
+        return None
+    
+    ticket_similar = similares[0]["ticket"]
+    mensagens = ticket_similar.get("mensagens", [])
+    respostas = [m for m in mensagens if m.get("is_atendente", False)]
+    
+    if not respostas:
+        return None
+    
+    prompt = f"""
+Você é atendente de suporte.
+
+Cliente: {ticket["titulo"]}
+Descrição: {ticket["descricao"]}
+
+Solução similar: {respostas[0]["conteudo"]}
+
+Adapte a solução. Seja claro e profissional.
+"""
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        response = model.generate_content(prompt, generation_config={"temperature": 0.3})
+        
+        resposta = response.text.strip()
+        return f"{resposta}\n\n---\n_💡 Sugestão automática. Atendente revisará._"
+        
+    except Exception as e:
+        print(f"[RESPOSTA AUTO] ❌ Erro: {e}")
+        return None
+
+
+print("[✓] Sistema carregado!")
+print("    • Camada 1: Regras (0-5ms)")
+print("    • Camada 2: Cache (10-50ms)")
+print("    • Camada 3: ML Aprendizado (50-100ms) 🆕")
+print("    • Camada 4: IA Gemini (1-3s)")
+print("\n💡 Para treinar ML: python retreinar_modelo.py")

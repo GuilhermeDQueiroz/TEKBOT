@@ -1,18 +1,20 @@
 import uuid
+import tickets as tickets_module
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import List
-from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha
+from typing import Optional, List, Dict, Any
+from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha, TicketCriar, TicketResposta, TicketAtualizar, AdicionarMensagemTicket, AtribuirTicket, FiltroTickets, EstatisticasAtendente, DashboardMetricas, StatusTicket, PrioridadeTicket, CategoriaTicket, TipoUsuario
 from models import UsuarioLogin, Token
 from auth import create_access_token
 from rag import processarPergunta
 from dotenv import load_dotenv
 from jose import JWTError, jwt
-from bson import json_util
+from bson import json_util, ObjectId
 from datetime import timedelta, datetime
+from pydantic import BaseModel, EmailStr, Field, validator
 from email.message import EmailMessage
 import os
 import bcrypt
@@ -370,6 +372,303 @@ def adicionar_mensagem(mensagem: MensagemEntrada, usuario: dict = Depends(verifi
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Erro ao salvar a mensagem")
 
+# ================================================================
+# ROTAS DE TICKETS
+# ================================================================
+
+@app.post("/tickets/criar", response_model=dict)
+def criar_ticket_route(
+    dados: TicketCriar,
+    usuario: dict = Depends(verificar_token)
+):
+    """Cria um novo ticket (cliente)"""
+    try:
+        ticket = tickets_module.criar_ticket(
+            titulo=dados.titulo,
+            descricao=dados.descricao,
+            categoria=dados.categoria.value,
+            email_cliente=usuario["email"],
+            prioridade_manual=dados.prioridade_manual.value if dados.prioridade_manual else None,
+            usar_ia=True  # ← Configurar: True para IA, False para análise básica
+        )
+        
+        ticket["_id"] = str(ticket["_id"])
+        return JSONResponse(
+            content=json.loads(json_util.dumps(ticket)),
+            status_code=201
+        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao criar ticket: {str(e)}")
+
+
+@app.get("/tickets/fila", response_model=List[dict])
+def obter_fila_tickets(
+    status: Optional[List[StatusTicket]] = None,
+    prioridade: Optional[List[PrioridadeTicket]] = None,
+    categoria: Optional[List[CategoriaTicket]] = None,
+    apenas_meus: bool = False,
+    usuario: dict = Depends(verificar_token)
+):
+    """Obtém fila de tickets ordenada inteligentemente (atendentes)"""
+    try:
+        filtros = {}
+        if status:
+            filtros["status"] = [s.value for s in status]
+        if prioridade:
+            filtros["prioridade"] = [p.value for p in prioridade]
+        if categoria:
+            filtros["categoria"] = [c.value for c in categoria]
+        if apenas_meus:
+            filtros["apenas_meus"] = True
+        
+        atendente_email = usuario["email"] if apenas_meus else None
+        tickets = tickets_module.obter_fila_inteligente(
+            atendente_email=atendente_email,
+            filtros=filtros
+        )
+        
+        for ticket in tickets:
+            ticket["_id"] = str(ticket["_id"])
+        
+        return JSONResponse(
+            content=json.loads(json_util.dumps(tickets)),
+            status_code=200
+        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao obter fila: {str(e)}")
+
+
+@app.get("/tickets/meus", response_model=List[dict])
+def listar_meus_tickets(usuario: dict = Depends(verificar_token)):
+    """Lista tickets do cliente logado"""
+    try:
+        tickets = tickets_module.listar_tickets_cliente(usuario["email"])
+        for ticket in tickets:
+            ticket["_id"] = str(ticket["_id"])
+        
+        return JSONResponse(
+            content=json.loads(json_util.dumps(tickets)),
+            status_code=200
+        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao listar tickets: {str(e)}")
+
+
+@app.get("/tickets/{ticket_id}", response_model=dict)
+def obter_ticket_detalhes(ticket_id: str, usuario: dict = Depends(verificar_token)):
+    """Obtém detalhes de um ticket"""
+    try:
+        ticket = tickets_module.obter_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket não encontrado")
+        
+        # Verificar permissão
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo_usuario == TipoUsuario.CLIENTE.value:
+            if ticket["email_cliente"] != usuario["email"]:
+                raise HTTPException(status_code=403, detail="Sem permissão")
+        
+        ticket["_id"] = str(ticket["_id"])
+        return JSONResponse(
+            content=json.loads(json_util.dumps(ticket)),
+            status_code=200
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao obter ticket: {str(e)}")
+
+
+@app.post("/tickets/{ticket_id}/atribuir")
+def atribuir_ticket_route(
+    ticket_id: str,
+    usuario: dict = Depends(verificar_token)
+):
+    """Atendente pega um ticket para si"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes")
+        
+        ticket = tickets_module.atribuir_ticket(ticket_id, usuario["email"])
+        ticket["_id"] = str(ticket["_id"])
+        
+        return JSONResponse(
+            content=json.loads(json_util.dumps(ticket)),
+            status_code=200
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao atribuir: {str(e)}")
+
+
+@app.post("/tickets/{ticket_id}/mensagem")
+def adicionar_mensagem_route(
+    ticket_id: str,
+    dados: AdicionarMensagemTicket,
+    usuario: dict = Depends(verificar_token)
+):
+    """Adiciona mensagem ao ticket"""
+    try:
+        ticket = tickets_module.obter_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket não encontrado")
+        
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        is_atendente = tipo in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]
+        
+        if not is_atendente and ticket["email_cliente"] != usuario["email"]:
+            raise HTTPException(status_code=403, detail="Sem permissão")
+        
+        mensagem = tickets_module.adicionar_mensagem(
+            ticket_id=ticket_id,
+            remetente_email=usuario["email"],
+            conteudo=dados.conteudo,
+            is_atendente=is_atendente
+        )
+        
+        return JSONResponse(
+            content=json.loads(json_util.dumps(mensagem)),
+            status_code=201
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao adicionar mensagem: {str(e)}")
+
+
+@app.patch("/tickets/{ticket_id}/status")
+def atualizar_status_route(
+    ticket_id: str,
+    dados: TicketAtualizar,
+    usuario: dict = Depends(verificar_token)
+):
+    """Atualiza status do ticket (apenas atendentes)"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes")
+        
+        ticket = tickets_module.atualizar_status_ticket(
+            ticket_id=ticket_id,
+            novo_status=dados.status.value if dados.status else None,
+            observacoes=dados.observacoes
+        )
+        
+        ticket["_id"] = str(ticket["_id"])
+        return JSONResponse(
+            content=json.loads(json_util.dumps(ticket)),
+            status_code=200
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar: {str(e)}")
+
+
+@app.get("/tickets/estatisticas/atendente", response_model=EstatisticasAtendente)
+def obter_estatisticas_atendente_route(usuario: dict = Depends(verificar_token)):
+    """Retorna estatísticas do atendente logado"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes")
+        
+        stats = tickets_module.obter_estatisticas_atendente(usuario["email"])
+        return JSONResponse(content=stats, status_code=200)
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@app.get("/tickets/dashboard/metricas", response_model=DashboardMetricas)
+def obter_dashboard_metricas_route(usuario: dict = Depends(verificar_token)):
+    """Retorna métricas gerais do dashboard (atendentes)"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes")
+        
+        metricas = tickets_module.obter_dashboard_metricas()
+        return JSONResponse(content=metricas, status_code=200)
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+# ================================================================
+# ROTAS DE GERENCIAMENTO DE USUÁRIOS
+# ================================================================
+
+@app.post("/usuarios/tornar-atendente")
+def tornar_atendente(
+    email: EmailStr,
+    usuario: dict = Depends(verificar_token)
+):
+    """Admin torna um usuário em atendente"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        result = colecao_usuarios.update_one(
+            {"email": email},
+            {"$set": {"tipo_usuario": TipoUsuario.ATENDENTE.value}}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        
+        return {"mensagem": f"Usuário {email} agora é atendente"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================================================================
+# ROTAS DE PÁGINAS HTML
+# ================================================================
+
+@app.get("/atendimento", response_class=FileResponse, include_in_schema=False)
+async def get_atendimento_page():
+    """Página de dashboard para atendentes"""
+    return FileResponse(FRONTEND_DIR / "html" / "atendimento.html")
+
+
+@app.get("/tickets", response_class=FileResponse, include_in_schema=False)
+async def get_tickets_page():
+    """Página de tickets para clientes"""
+    return FileResponse(FRONTEND_DIR / "html" / "tickets.html")
 
 # === ARQUIVOS ESTÁTICOS ===
 
