@@ -1,52 +1,51 @@
 <template>
-  <div class="login-container">
+  <v-container class="login-container">
     <img id="logo" src="/src/assets/claro.png" alt="Logo TekBot" class="logo-img" />
 
     <h2 class="login-header">Login</h2>
     <form id="login-form" class="login-form" @submit.prevent="submitForm">
-      <div class="input-group">
-        <label for="email">E-mail:</label>
-        <input
+      <v-container>
+        <!-- <label for="email">E-mail:</label> -->
+        <v-text-field label="E-mail:" type="email" id="email" name="email" v-model="formData.email" required
+          placeholder="Digite seu e-mail" variant="outlined"></v-text-field>
+        <!--  <input
           type="email"
           id="email"
           name="email"
           v-model="formData.email"
           required
           placeholder="Digite seu e-mail"
-        />
-      </div>
-      <div class="input-group">
-        <label for="password">Senha:</label>
-        <input
-          type="password"
-          id="password"
-          name="password"
-          v-model="formData.pswd"
-          required
-          placeholder="Digite sua senha"
-        />
-      </div>
+        /> -->
+      </v-container>
+      <v-container>
+        <!-- <label for="password">Senha:</label> -->
+        <v-text-field variant="outlined" label="Senha:" type="password" id="senha" name="senha" v-model="formData.senha"
+          required placeholder="Digite sua senha"></v-text-field>
+        <!--  <input type="password" id="password" name="password" v-model="formData.pswd" required
+          placeholder="Digite sua senha" /> -->
+      </v-container>
       <button type="submit" class="login-btn">ENTRAR</button>
     </form>
 
     <!-- Links para cadastro e recuperação de senha -->
-    <div class="login-links">
+    <v-container class="login-links">
       <router-link :to="{ name: 'Cadastro' }">Cadastre-se</router-link>
 
       <router-link :to="{ name: 'RecuperarSenha' }">Esqueceu sua senha?</router-link>
-    </div>
-  </div>
+    </v-container>
+  </v-container>
 </template>
 
 <script setup>
 import { reactive } from "vue";
 import { useRouter } from "vue-router"; // Importe useRouter
+import axios from "axios";
 
 const router = useRouter(); // Obtenha a instância do roteador
 
 const formData = reactive({
   email: "",
-  pswd: "",
+  senha: "",
 });
 
 const submitForm = async () => {
@@ -55,23 +54,46 @@ const submitForm = async () => {
     console.log("Dados a serem enviados:", formData);
 
     // Simulação de uma chamada de API bem-sucedida
-    const response = await new Promise((resolve) =>
-      setTimeout(() => resolve({ success: true, userId: 123 }), 1000)
-    );
+    try {
+      const response = await axios.post("http://127.0.0.1:8000/login", {
+        email: email.value,
+        senha: senha.value
+      });
 
-    if (response.success) {
-      console.log("Formulário enviado com sucesso! Redirecionando...");
 
-      // 2. Redirecionamento: Duas formas de fazer
+      if (response.data && response.data.access_token) {
 
-      // Opção 1: Usando o nome da rota (Recomendado)
-      // É mais robusto, pois se o 'path' da rota mudar, o nome continua o mesmo.
-      router.push({ name: "Chat" });
-      //router.push({ name: 'Chat', params: { id: response.userId } });
+        localStorage.setItem('authToken', response.data.access_token);
 
-      // Opção 2: Usando o caminho (path) da rota
-      // router.push(`/sucesso/${response.userId}`);
+        // window.location.href = '../html/chat.html';
+
+        console.log("Formulário enviado com sucesso! Redirecionando...");
+
+        // 2. Redirecionamento: Duas formas de fazer
+
+        // Opção 1: Usando o nome da rota (Recomendado)
+        // É mais robusto, pois se o 'path' da rota mudar, o nome continua o mesmo.
+        router.push({ name: "Chat" });
+        //router.push({ name: 'Chat', params: { id: response.userId } });
+
+
+
+
+      } else {
+        throw new Error("Resposta do servidor inválida: token não encontrado.");
+      }
+
+    } catch (error) {
+      console.error("Erro no login:", error);
+      /* Swal.fire({
+        icon: "error",
+        title: "Erro ao logar!",
+        text: "Verifique seu e-mail e senha e tente novamente.",
+        heightAuto: false
+      }); */
     }
+
+
   } catch (error) {
     console.error("Erro ao enviar formulário:", error);
   }
