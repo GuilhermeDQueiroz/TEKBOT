@@ -1,44 +1,42 @@
 <template>
-  
+
 
   <div class="login-container" id="login-container" ref="loginContainer">
-    <h2 class="login-header">Cadastro</h2>
-    <form class="login-form" id="cadastro-form" @submit.prevent="submitForm">
+    <v-h2 class="login-header">Cadastro</v-h2>
+    <v-form class="login-form" id="cadastro-form" @submit.prevent="submitForm">
       <div class="input-group">
-        <label for="email">E-mail:</label>
-        <input
+        <!--  <v-label for="email">E-mail:</v-label> -->
+        <v-text-field v-model="formData.email" type="email" id="email" name="email" required label="E-mail:"
+          placeholder="Digite seu e-mail" variant="outlined"></v-text-field>
+
+        <!--  <input
           type="email"
           id="email"
           name="email"
           required
           placeholder="Digite seu e-mail"
           v-model="formData.email"
-        />
+        /> -->
       </div>
       <div class="input-group">
-        <label for="password">Senha:</label>
-        <input
-          type="password"
-          id="password"
-          name="password"
-          required
-          placeholder="Digite sua senha"
-          v-model="formData.pswd"
-        />
+        <!-- <label for="password">Senha:</label> -->
+        <v-text-field label="Senha:" v-model="formData.pswd" variant="outlined" type="password" id="password"
+          name="password" required placeholder="Digite sua senha"></v-text-field>
+
+        <!--  <input type="password" id="password" name="password" required placeholder="Digite sua senha"
+          v-model="formData.pswd" /> -->
       </div>
       <div class="input-group">
-        <label for="confirm-password">Confirmar Senha:</label>
-        <input
-          type="password"
-          id="confirm-password"
-          name="confirm-password"
-          required
-          placeholder="Confirme sua senha"
-          v-model="formData.confirmPswd"
-        />
+        <!-- <v-label for="confirm-password">Confirmar Senha:</v-label> -->
+        <v-text-field label="Confirmar Senha:" variant="outlined" type="password" id="confirm-password"
+          name="confirm-password" required placeholder="Confirme sua senha"
+          v-model="formData.confirmPswd"></v-text-field>
+
+        <!-- <v-input type="password" id="confirm-password" name="confirm-password" required placeholder="Confirme sua senha"
+          v-model="formData.confirmPswd" /> -->
       </div>
       <button type="submit" class="login-btn">Cadastrar</button>
-    </form>
+    </v-form>
 
     <div class="login-links">
       <router-link :to="{ name: 'Login' }">Já tem uma conta? Faça login</router-link>
@@ -77,7 +75,7 @@ async function submitForm(event) {
       mensagemContainer.textContent = "Cadastro realizado com sucesso!";
       mensagemContainer.classList.add("sucesso");
       setTimeout(() => {
-       router.replace({ name: "Login" });
+        router.replace({ name: "Login" });
       }, 2000);
     } catch (error) {
       alert("login com erro");
@@ -88,4 +86,8 @@ async function submitForm(event) {
 }
 </script>
 
-<style scope></style>
+<style scope>
+input {
+  border: none;
+}
+</style>
