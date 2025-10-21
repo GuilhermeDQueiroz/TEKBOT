@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -273,3 +273,21 @@ class AtualizarPerfilAtendente(BaseModel):
     nome_completo: Optional[str] = None
     telefone: Optional[str] = None
     disponivel: bool = True
+
+class TreinamentoEntrada(BaseModel):
+    pergunta: str = Field(..., min_length=10, max_length=1000)
+    resposta: str = Field(..., min_length=10, max_length=5000)
+    categoria: Optional[str] = Field(None)
+    tags: Optional[List[str]] = Field(default=[])
+    
+    @validator('pergunta')
+    def validar_pergunta(cls, v):
+        if not v or v.strip() == "":
+            raise ValueError("Pergunta não pode estar vazia")
+        return v.strip()
+    
+    @validator('resposta')
+    def validar_resposta(cls, v):
+        if not v or v.strip() == "":
+            raise ValueError("Resposta não pode estar vazia")
+        return v.strip()

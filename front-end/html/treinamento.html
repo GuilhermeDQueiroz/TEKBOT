@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treinamento da IA - TekBot</title>
+    <link rel="stylesheet" href="/css/treinamento.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Treinamento da IA</h1>
+            <p>Adicione novos conhecimentos para melhorar as respostas do TekBot</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="novo">➕ Novo Treinamento</button>
+            <button class="tab" data-tab="lista">📋 Treinamentos</button>
+        </div>
+
+        <div class="tab-content active" id="novo">
+            <div id="alertContainer"></div>
+
+            <form id="formTreinamento">
+                <div class="form-group">
+                    <label for="pergunta">Pergunta *</label>
+                    <textarea id="pergunta" placeholder="Ex: Como emitir nota fiscal?" required minlength="10"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="resposta">Resposta Correta *</label>
+                    <textarea id="resposta" placeholder="Ex: Para emitir..." required minlength="10" style="min-height: 200px;"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="categoria">Categoria</label>
+                    <select id="categoria">
+                        <option value="">Selecione</option>
+                        <option value="nfe">NFe</option>
+                        <option value="vendas">Vendas</option>
+                        <option value="estoque">Estoque</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="tagsInput">Tags</label>
+                    <div class="tags-container" id="tagsContainer">
+                        <input type="text" id="tagsInput" placeholder="Pressione Enter">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="btnSalvar">
+                    💾 Salvar Treinamento
+                </button>
+            </form>
+        </div>
+
+        <div class="tab-content" id="lista">
+            <div class="loading" id="loadingLista">Carregando...</div>
+            <div class="training-list" id="listaTreinamentos"></div>
+        </div>
+    </div>
+
+    <script src="/js/treinamento.js"></script>
+</body>
+</html>

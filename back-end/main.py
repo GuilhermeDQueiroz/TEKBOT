@@ -6,10 +6,10 @@ from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional, List, Dict, Any
-from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha, TicketCriar, TicketResposta, TicketAtualizar, AdicionarMensagemTicket, AtribuirTicket, FiltroTickets, EstatisticasAtendente, DashboardMetricas, StatusTicket, PrioridadeTicket, CategoriaTicket, TipoUsuario
+from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha, TicketCriar, TicketResposta, TicketAtualizar, AdicionarMensagemTicket, AtribuirTicket, FiltroTickets, EstatisticasAtendente, DashboardMetricas, StatusTicket, PrioridadeTicket, CategoriaTicket, TipoUsuario, TreinamentoEntrada
 from models import UsuarioLogin, Token
 from auth import create_access_token
-from rag import processarPergunta
+from rag import processarPergunta, modelo_embedding
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 from bson import json_util, ObjectId
@@ -670,6 +670,74 @@ async def get_tickets_page():
     """Página de tickets para clientes"""
     return FileResponse(FRONTEND_DIR / "html" / "tickets.html")
 
+
+# ================================================================
+# ROTAS DE TREINAMENTO - SEM AUTENTICAÇÃO
+# ================================================================
+
+# ================================================================
+# ROTAS DE TREINAMENTO - PADRÃO CORRETO (COLEÇÃO INTERACOES)
+# ================================================================
+
+@app.post("/treinamento/adicionar-publico")
+def adicionar_treinamento_publico(dados: TreinamentoEntrada):
+    try:
+        print("🔥 SALVANDO TREINAMENTO...")
+        
+        pergunta_embedding = modelo_embedding.encode([dados.pergunta])[0].tolist()
+        
+        documento = {
+            "tipo": "treinamento",
+            "pergunta": dados.pergunta,
+            "resposta": dados.resposta,
+            "embedding": pergunta_embedding,
+            "contexto_utilizado": [],
+            "sessao_id": "treinamento_dev",
+            "data": datetime.utcnow(),
+            "categoria": dados.categoria,
+            "tags": dados.tags if dados.tags else [],
+            "criado_por": "desenvolvedor",
+            "ativo": True
+        }
+        
+        resultado = colecao_interacoes.insert_one(documento)
+        print(f"✅ SALVO! ID: {resultado.inserted_id}")
+        
+        return {
+            "mensagem": "Treinamento adicionado com sucesso!",
+            "id": str(resultado.inserted_id),
+            "pergunta": dados.pergunta,
+            "embedding_gerado": True
+        }
+    except Exception as e:
+        print(f"❌ ERRO: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+@app.get("/treinamento/listar-publico")
+def listar_treinamentos_publico(skip: int = 0, limit: int = 50, categoria: Optional[str] = None):
+    try:
+        filtro = {"tipo": "treinamento", "ativo": True}
+        if categoria:
+            filtro["categoria"] = categoria
+        
+        treinamentos = list(colecao_interacoes.find(filtro).sort("data", -1).skip(skip).limit(limit))
+        
+        for t in treinamentos:
+            t["_id"] = str(t["_id"])
+            t.pop("embedding", None)
+            t["criado_em"] = t.pop("data", None)
+        
+        total = colecao_interacoes.count_documents(filtro)
+        
+        return {"treinamentos": treinamentos, "total": total, "skip": skip, "limit": limit}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/treinamento", response_class=FileResponse, include_in_schema=False)
+async def get_treinamento_page():
+    return FileResponse(FRONTEND_DIR / "html" / "treinamento.html")
 # === ARQUIVOS ESTÁTICOS ===
 
 from pathlib import Path

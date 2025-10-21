@@ -1152,3 +1152,33 @@ body.escuro .form-hint {
 .modal-btn-success:hover {
     background-color: #059669;
 }
+
+.message-bubble {
+    max-width: 70%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.message-bubble pre {
+    background: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    white-space: pre-wrap;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.message-bubble code {
+    background: none !important;
+    padding: 0 !important;
+    border: none !important;
+    font-family: inherit;
+    font-size: inherit;
+    white-space: pre-wrap;
+}
+
+.message-bubble p {
+    margin: 0;
+    white-space: pre-line;
+}
