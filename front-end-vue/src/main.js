@@ -10,6 +10,9 @@ import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import { faSignOutAlt } from '@fortawesome/free-solid-svg-icons'
 import { createPinia } from 'pinia'
 
+import VueSweetalert2 from 'vue-sweetalert2';
+import 'sweetalert2/dist/sweetalert2.min.css';
+
 
 // Vuetify
 import 'vuetify/styles'
@@ -32,6 +35,7 @@ app.component('font-awesome-icon', FontAwesomeIcon)
 app.use(router)
 app.use(pinia)
 app.use(vuetify)
+app.use(VueSweetalert2);
 
 
 app.mount('#app')

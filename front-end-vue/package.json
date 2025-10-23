@@ -17,8 +17,10 @@
     "@fortawesome/vue-fontawesome": "^3.1.2",
     "axios": "^1.12.2",
     "pinia": "^3.0.3",
+    "sweetalert2": "^11.26.3",
     "vue": "^3.5.18",
-    "vue-router": "^4.5.1"
+    "vue-router": "^4.5.1",
+    "vue-sweetalert2": "^5.0.11"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",

@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { reactive } from "vue";
+import { reactive,inject } from "vue";
 import { useRouter } from "vue-router"; // Importe useRouter
 import axios from "axios";
 
@@ -47,6 +47,8 @@ const formData = reactive({
   email: "",
   senha: "",
 });
+
+const swal = inject('$swal');
 
 const submitForm = async () => {
   try {
@@ -85,12 +87,12 @@ const submitForm = async () => {
 
     } catch (error) {
       console.error("Erro no login:", error);
-      /* Swal.fire({
+      swal.fire({
         icon: "error",
         title: "Erro ao logar!",
         text: "Verifique seu e-mail e senha e tente novamente.",
         heightAuto: false
-      }); */
+      });
     }
 
 
