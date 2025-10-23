@@ -2,12 +2,12 @@
   <div class="app-container">
     <!-- Sidebar -->
     <aside :class="['sidebar', { collapsed: !sidebarAberta }]">
-      <div class="sidebar-header">
+      <v-container class="sidebar-header">
         <button class="new-chat-button" @click="novaConversa" v-show="sidebarAberta">+</button>
         <button class="sidebar-toggle" @click="toggleSidebar">
           <span>☰</span>
         </button>
-      </div>
+      </v-container>
       <div class="sidebar-content" v-show="sidebarAberta">
         <h3 class="sidebar-title">Conversas</h3>
         <div class="conversations-list">
@@ -58,7 +58,6 @@ import { onMounted, ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 const router = useRouter();
 const chat = ref(null);
-const input = ref(null);
 
 const formData = reactive({
   msg: "",
