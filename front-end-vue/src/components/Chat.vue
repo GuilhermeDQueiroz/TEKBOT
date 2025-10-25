@@ -2,25 +2,47 @@
   <div class="app-container">
     <!-- Sidebar -->
     <aside :class="['sidebar', { collapsed: !sidebarAberta }]">
-      <v-container class="sidebar-header">
-        <button class="new-chat-button" @click="novaConversa" v-show="sidebarAberta">+</button>
-        <button class="sidebar-toggle" @click="toggleSidebar">
-          <span>☰</span>
-        </button>
-      </v-container>
+      <div class="sidebar-header">
+        <div class="sidebar-buttons">
+          <button class="sidebar-toggle" @click="toggleSidebar" title="Fechar barra lateral">
+            <span>☰</span>
+          </button>
+        </div>
+      </div>
       <div class="sidebar-content" v-show="sidebarAberta">
+        <!-- Botão Nova Conversa movido para cá -->
+        <button class="new-chat-button" @click="novaConversa" title="Nova conversa">
+          <span class="plus-icon">+</span>
+          <span class="button-text">Nova Conversa</span>
+        </button>
+        
         <h3 class="sidebar-title">Conversas</h3>
+        
         <div class="conversations-list">
           <div 
             v-for="conversa in conversas" 
             :key="conversa.id"
             :class="['conversation-item', { active: conversa.id === conversaAtiva }]"
-            @click="selecionarConversa(conversa.id)"
           >
-            <span class="conversation-title">{{ conversa.titulo }}</span>
-            <span class="conversation-date">{{ conversa.data }}</span>
+            <div class="conversation-info" @click="selecionarConversa(conversa.id)">
+              <span class="conversation-title">{{ conversa.titulo }}</span>
+              <span class="conversation-date">{{ conversa.data }}</span>
+            </div>
+            <button 
+              class="delete-conversation-button" 
+              @click.stop="excluirConversa(conversa.id)"
+              title="Excluir conversa"
+            >
+              <font-awesome-icon icon="trash" />
+            </button>
           </div>
         </div>
+        
+        <!-- Botão de sair movido para o rodapé -->
+        <button class="sidebar-logout-button" @click="voltarParaLogin()" title="Sair">
+          <font-awesome-icon icon="sign-out-alt" />
+          <span>Sair</span>
+        </button>
       </div>
     </aside>
 
@@ -28,9 +50,11 @@
     <div class="chat-container">
       <header class="chat-header">
         <span class="chat-title">TekBot</span>
-        <button class="logout-button" @click="voltarParaLogin()">
-          <font-awesome-icon icon="sign-out-alt" /> Sair
-        </button>
+        <div class="header-buttons">
+          <button class="ticket-button" @click="abrirTicket" title="Abrir ticket">
+            <font-awesome-icon icon="ticket-alt" /> Criar Ticket
+          </button>
+        </div>
       </header>
 
       <main id="chat" ref="chat" class="chat-main">
@@ -58,6 +82,7 @@ import { onMounted, ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 const router = useRouter();
 const chat = ref(null);
+const input = ref(null);
 
 const formData = reactive({
   msg: "",
@@ -83,13 +108,8 @@ onMounted(() => {
   // Carrega conversas do localStorage
   carregarConversas();
   
-  // Se não houver conversas, cria uma nova
-  if (conversas.value.length === 0) {
-    criarNovaConversa();
-  } else {
-    // Carrega a última conversa ativa
-    selecionarConversa(conversas.value[0].id);
-  }
+  // ALTERADO: Sempre cria uma nova conversa ao fazer login
+  criarNovaConversa();
 });
 
 function carregarConversas() {
@@ -144,6 +164,46 @@ function selecionarConversa(id) {
   
   conversaAtiva.value = id;
   carregarMensagensConversa(id);
+}
+
+// Função para excluir conversa
+function excluirConversa(id) {
+  // Confirma se o usuário realmente quer excluir
+  if (!confirm('Tem certeza que deseja excluir esta conversa?')) {
+    return;
+  }
+  
+  // Remove a conversa da lista
+  const index = conversas.value.findIndex(c => c.id === id);
+  if (index !== -1) {
+    conversas.value.splice(index, 1);
+  }
+  
+  // Remove as mensagens associadas
+  delete mensagensPorConversa.value[id];
+  
+  // Salva as alterações
+  salvarConversas();
+  
+  // Se a conversa excluída era a ativa, seleciona outra
+  if (conversaAtiva.value === id) {
+    if (conversas.value.length > 0) {
+      // Seleciona a primeira conversa disponível
+      selecionarConversa(conversas.value[0].id);
+    } else {
+      // Se não há mais conversas, cria uma nova
+      criarNovaConversa();
+    }
+  }
+}
+
+// NOVA FUNÇÃO: Abrir ticket
+function abrirTicket() {
+  // Aqui você pode implementar a lógica para abrir um ticket
+  // Por exemplo, abrir um modal, redirecionar para outra página, etc.
+  alert('Funcionalidade de ticket será implementada aqui!');
+  // Exemplo de redirecionamento:
+  // router.push('/ticket');
 }
 
 function salvarChatAtual() {
@@ -293,10 +353,27 @@ function appendTypingMessage() {
 
   const bubble = document.createElement("div");
   bubble.className = "message-bubble left typing-bubble";
-  bubble.innerHTML = `
-    <div class="typing-indicator">
-      <span></span><span></span><span></span>
-    </div>
+
+  const typingIndicator = document.createElement("div");
+  typingIndicator.className = "typing-indicator";
+
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement("span");
+    typingIndicator.appendChild(dot);
+  }
+
+  bubble.appendChild(typingIndicator);
+
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes bounce {
+      0%, 60%, 100% {
+        transform: translateY(0);
+      }
+      30% {
+        transform: translateY(-8px);
+      }
+    }
   `;
 
   wrapper.appendChild(avatar);
@@ -346,11 +423,10 @@ function voltarParaLogin() {
 
 .sidebar-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  padding: 0.75rem;
+  padding: 0.75rem 1rem;
   background-color: black;
-  gap: 0.5rem;
   transition: background-color 0.3s ease;
 }
 
@@ -360,45 +436,53 @@ function voltarParaLogin() {
   background-color: #1e293b;
 }
 
+.sidebar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Botão Nova Conversa - Mesmas proporções das conversas */
 .new-chat-button {
-  background-color: #2196f3;
+  background-color: transparent;
   color: white;
-  border: none;
+  border: 1px solid #334155;
   border-radius: 6px;
-  width: 32px;
-  height: 32px;
-  font-size: 1.3rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.3s;
-  flex-shrink: 0;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+  margin-top: auto;
 }
 
 .new-chat-button:hover {
-  background-color: #1976d2;
+  background-color: #334155;
+  border-color: #475569;
+}
+
+.new-chat-button .button-text {
+  font-size: 0.9rem;
 }
 
 .sidebar-toggle {
-  background-color: #2196f3;
   color: white;
-  border: none;
+  border: 1px none;
   border-radius: 6px;
   width: 32px;
   height: 32px;
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background-color 0.3s, transform 0.2s;
   flex-shrink: 0;
-}
-
-.sidebar-toggle:hover {
-  background-color: #1976d2;
-  transform: scale(1.05);
 }
 
 .sidebar-toggle:active {
@@ -415,10 +499,41 @@ function voltarParaLogin() {
 .sidebar-title {
   color: white;
   margin: 0;
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  background-color: black;
+  background-color: transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #9ca3af;
+}
+
+/* Botão de sair na sidebar */
+.sidebar-logout-button {
+  background-color: transparent;
+  color: white;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+  margin-top: auto;
+}
+
+.sidebar-logout-button:hover {
+  background-color: #334155;
+  border-color: #475569;
+}
+
+.sidebar-logout-button:active {
+  transform: scale(0.98);
 }
 
 .conversations-list {
@@ -434,8 +549,10 @@ function voltarParaLogin() {
   cursor: pointer;
   transition: background-color 0.2s;
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  position: relative;
 }
 
 .conversation-item:hover {
@@ -444,6 +561,14 @@ function voltarParaLogin() {
 
 .conversation-item.active {
   background-color: #1e293b;
+}
+
+.conversation-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
 }
 
 .conversation-title {
@@ -462,6 +587,39 @@ function voltarParaLogin() {
 
 .conversation-item.active .conversation-date {
   color: #e0f2fe;
+}
+
+/* Botão de excluir conversa com ícone de lixeira */
+.delete-conversation-button {
+  background-color: transparent;
+  color: #9ca3af;
+  border: none;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  opacity: 0;
+  padding: 0;
+}
+
+.conversation-item:hover .delete-conversation-button {
+  opacity: 1;
+}
+
+.delete-conversation-button:hover {
+  background-color: #ef4444;
+  color: white;
+  transform: scale(1.1);
+}
+
+.delete-conversation-button:active {
+  transform: scale(0.95);
 }
 
 /* Chat Container - agora ocupa o espaço restante */
@@ -487,8 +645,38 @@ function voltarParaLogin() {
 }
 
 .chat-title {
-  margin-right: auto;
   color: #2196f3;
+}
+
+/* Container para os botões do header */
+.header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Botão de ticket */
+.ticket-button {
+  background-color: #10b981;
+  border: none;
+  color: white;
+  font-size: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background-color 0.3s, transform 0.2s;
+}
+
+.ticket-button:hover {
+  background-color: #059669;
+  transform: translateY(-2px);
+}
+
+.ticket-button:active {
+  transform: translateY(0);
 }
 
 .logout-button {
@@ -502,13 +690,16 @@ function voltarParaLogin() {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  transition: background-color 0.3s, color 0.3s;
-  position: relative;
-  left: -5%; /* desloca horizontalmente sem afetar alinhamento vertical */
+  transition: background-color 0.3s, transform 0.2s;
 }
 
 .logout-button:hover {
   background-color: #1976d2;
+  transform: translateY(-2px);
+}
+
+.logout-button:active {
+  transform: translateY(0);
 }
 
 .chat-main {
@@ -532,7 +723,7 @@ function voltarParaLogin() {
 .chat-input {
   flex: 1;
   padding: 0.75rem 1rem;
-  border-radius: 10px;
+  border-radius: 15px;
   background-color: #1e293b;
   color: white;
   border: none;
@@ -540,6 +731,7 @@ function voltarParaLogin() {
   font-family: "Rubik", sans-serif;
   font-size: 1rem;
   font-weight: 400;
+  height: 100%;
 }
 
 .chat-input::placeholder {
@@ -555,7 +747,7 @@ function voltarParaLogin() {
   background-color: #2196f3;
   padding: 0.75rem 1.5rem;
   border: none;
-  border-radius: 9999px;
+  border-radius: 15px;
   font-weight: 600;
   font-size: 0.95rem;
   text-transform: uppercase;
@@ -564,6 +756,7 @@ function voltarParaLogin() {
   cursor: pointer;
   transition: background-color 0.2s ease-in-out;
   font-family: "Rubik", sans-serif;
+  height: 100%;
 }
 
 .chat-button:hover {
