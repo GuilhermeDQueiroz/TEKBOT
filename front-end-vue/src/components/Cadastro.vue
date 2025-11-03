@@ -46,6 +46,7 @@
 
 <script setup>
 import { reactive, ref } from "vue";
+import axios from "axios";
 const loginContainer = ref(null);
 const formData = reactive({
   email: "",
@@ -78,6 +79,7 @@ async function submitForm(event) {
         router.replace({ name: "Login" });
       }, 2000);
     } catch (error) {
+      console.log(error)
       alert("login com erro");
     }
   }
