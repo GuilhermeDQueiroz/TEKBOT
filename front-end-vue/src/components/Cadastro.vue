@@ -1,7 +1,7 @@
 <template>
 
-
   <div class="login-container" id="login-container" ref="loginContainer">
+ <SwitchTemaComponent></SwitchTemaComponent>
     <v-h2 class="login-header">Cadastro</v-h2>
     <v-form class="login-form" id="cadastro-form" @submit.prevent="submitForm">
       <div class="input-group">

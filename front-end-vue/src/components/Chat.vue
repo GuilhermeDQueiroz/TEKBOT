@@ -4,10 +4,12 @@
     <aside :class="['sidebar', { collapsed: !sidebarAberta }]">
       <div class="sidebar-header">
         <div class="sidebar-buttons">
+        
           <button class="sidebar-toggle" @click="toggleSidebar" title="Fechar barra lateral">
             <span>☰</span>
           </button>
         </div>
+        
       </div>
       <div class="sidebar-content" v-show="sidebarAberta">
         <!-- Botão Nova Conversa movido para cá -->
@@ -51,10 +53,13 @@
       <header class="chat-header">
         <span class="chat-title">TekBot</span>
         <div class="header-buttons">
+        <SwitchTemaComponent></SwitchTemaComponent>
           <button class="ticket-button" @click="abrirTicket" title="Abrir ticket">
             <font-awesome-icon icon="ticket-alt" /> Criar Ticket
           </button>
+          
         </div>
+        
       </header>
 
       <main id="chat" ref="chat" class="chat-main">
@@ -876,22 +881,6 @@ button,
   background-color: inherit;
   color: inherit;
   border: 1px solid #888;
-}
-
-.switch {
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  width: 60px;
-  height: 34px;
-  display: inline-block;
-  z-index: 1000;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
 }
 
 .slider {

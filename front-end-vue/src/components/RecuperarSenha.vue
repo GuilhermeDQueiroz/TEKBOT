@@ -2,6 +2,7 @@
  
 
   <div class="login-container">
+   <SwitchTemaComponent></SwitchTemaComponent>
     <h2 class="login-header">Recuperar senha</h2>
     <p class="help-text">
       Digite seu e-mail para receber o link de redefinição de senha.

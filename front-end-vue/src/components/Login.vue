@@ -1,5 +1,6 @@
 <template>
   <v-container class="login-container">
+   <SwitchTemaComponent></SwitchTemaComponent>
     <img id="logo" src="/src/assets/claro.png" alt="Logo TekBot" class="logo-img" />
 
     <h2 class="login-header">Login</h2>
