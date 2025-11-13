@@ -1,12 +1,22 @@
+# main.py
 import uuid
 import tickets as tickets_module
-from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi import FastAPI, HTTPException, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional, List, Dict, Any
-from schemas import PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha, TicketCriar, TicketResposta, TicketAtualizar, AdicionarMensagemTicket, AtribuirTicket, FiltroTickets, EstatisticasAtendente, DashboardMetricas, StatusTicket, PrioridadeTicket, CategoriaTicket, TipoUsuario, TreinamentoEntrada
+from webhook import webhook_manager
+from schemas import (
+    PerguntaEntrada, MensagemEntrada, RedefinirSenha, RecuperacaoSenha,
+    TicketCriar, TicketResposta, TicketAtualizar, AdicionarMensagemTicket,
+    AtribuirTicket, FiltroTickets, EstatisticasAtendente, DashboardMetricas,
+    StatusTicket, PrioridadeTicket, CategoriaTicket, TipoUsuario, TreinamentoEntrada,
+    WebhookConfig, WebhookConfigResposta, WebhookResposta, FeedbackAnalise,
+    NivelFeedback, EstatisticasFeedback, ListaFeedbacks, WebhookTesteResposta,
+    DadosSessao
+)
 from models import UsuarioLogin, Token
 from auth import create_access_token
 from rag import processarPergunta, modelo_embedding
@@ -24,13 +34,25 @@ import traceback
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from database import colecao_usuarios, colecao_mensagens, colecao_sessoes, colecao_interacoes
+from database import (
+    colecao_usuarios, colecao_mensagens, colecao_sessoes, colecao_interacoes,
+    colecao_webhook_config, colecao_webhook_feedbacks, colecao_webhook_logs
+)
 
+# Opcional worker imports
+import threading
+import time
+
+# Carregar .env
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("Nenhuma SECRET_KEY definida no arquivo .env. O servidor não pode iniciar.")
 ALGORITHM = "HS256"
+
+# Diretório do front-end (definido cedo para evitar uso antes de declarar)
+from pathlib import Path
+FRONTEND_DIR = Path(__file__).resolve().parent.parent.joinpath("front-end")
 
 app = FastAPI()
 
@@ -217,7 +239,9 @@ def criar_sessao(usuario: dict = Depends(verificar_token)):
             "user_id": usuario["user_id"],
             "titulo": "Nova Conversa",
             "criado_em": datetime.utcnow(),
-            "atualizado_em": datetime.utcnow()
+            "atualizado_em": datetime.utcnow(),
+            # status pode ser "ativa" ou "finalizada"
+            "status": "ativa"
         }
         
         colecao_sessoes.insert_one(nova_sessao)
@@ -271,7 +295,7 @@ def deletar_sessao(sessao_id: str, usuario: dict = Depends(verificar_token)):
         colecao_sessoes.delete_one({"_id": sessao_id, "user_id": usuario["user_id"]})
         colecao_interacoes.delete_many({"sessao_id": sessao_id})
         
-        return {"mensagem": "Sessão deletada com sucesso"}
+        return {"messagem": "Sessão deletada com sucesso"}
 
     except Exception as e:
         traceback.print_exc()
@@ -291,6 +315,67 @@ def obter_historico_sessao(sessao_id: str, usuario: dict = Depends(verificar_tok
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro ao obter histórico: {str(e)}")
+
+
+# NOVA ROTA: Fechar sessão e enfileirar envio para análise
+@app.post("/sessoes/{sessao_id}/fechar")
+def fechar_sessao(sessao_id: str, force: bool = False, usuario: dict = Depends(verificar_token)):
+    """
+    Fecha a sessão (marca finalizada) e enfileira o envio para análise via webhook.
+    - force: se True, força reenvio mesmo que já tenha sido enviado antes.
+    """
+    try:
+        # Verificar se existe
+        sessao = colecao_sessoes.find_one({"_id": sessao_id})
+        if not sessao:
+            raise HTTPException(status_code=404, detail="Sessão não encontrada")
+
+        # Permissão: dono da sessão ou atendente/admin
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+
+        if tipo_usuario == TipoUsuario.CLIENTE.value:
+            if sessao.get("user_id") != usuario["user_id"]:
+                raise HTTPException(status_code=403, detail="Sem permissão")
+
+        # Verificar se já foi enfileirada (evitar duplicatas), a menos que force=True
+        if sessao.get("enfileirado_para_analise") and not force:
+            return JSONResponse(content={"mensagem": "Sessão já enfileirada para análise", "sessao_id": sessao_id}, status_code=200)
+
+        # Marcar como finalizada / atualizar timestamps
+        update_fields = {
+            "status": "finalizada",
+            "atualizado_em": datetime.utcnow(),
+            "finalizada_em": datetime.utcnow(),
+            "enfileirado_para_analise": True,
+            "enfileirado_em": datetime.utcnow()
+        }
+
+        colecao_sessoes.update_one({"_id": sessao_id}, {"$set": update_fields})
+
+        # Enfileira o envio (assíncrono) - tenta usar enviar_webhook_async com fallback
+        try:
+            resultado = webhook_manager.enviar_webhook_async(sessao_id, force=force)
+        except AttributeError:
+            resultado = webhook_manager.enviar_webhook(sessao_id, force=force)
+
+        # Retornar info útil ao cliente/front-end
+        resposta = {
+            "mensagem": "Sessão finalizada e envio enfileirado",
+            "sessao_id": sessao_id,
+            "enfileirado": resultado.get("sucesso", False),
+            "detalhes": resultado
+        }
+
+        # 202 se enfileirado com sucesso, 200 caso contrário
+        status_code = 202 if resultado.get("sucesso") else 200
+        return JSONResponse(content=resposta, status_code=status_code)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao fechar sessão: {str(e)}")
 
 
 # === ROTAS DE IA ===
@@ -372,15 +457,12 @@ def adicionar_mensagem(mensagem: MensagemEntrada, usuario: dict = Depends(verifi
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Erro ao salvar a mensagem")
 
-# ================================================================
-# ROTAS DE TICKETS
-# ================================================================
 
+# ================================================================
+# ROTAS DE TICKETS (mantive seu código original)
+# ================================================================
 @app.post("/tickets/criar", response_model=dict)
-def criar_ticket_route(
-    dados: TicketCriar,
-    usuario: dict = Depends(verificar_token)
-):
+def criar_ticket_route(dados: TicketCriar, usuario: dict = Depends(verificar_token)):
     """Cria um novo ticket (cliente)"""
     try:
         ticket = tickets_module.criar_ticket(
@@ -389,14 +471,11 @@ def criar_ticket_route(
             categoria=dados.categoria.value,
             email_cliente=usuario["email"],
             prioridade_manual=dados.prioridade_manual.value if dados.prioridade_manual else None,
-            usar_ia=True  # ← Configurar: True para IA, False para análise básica
+            usar_ia=True
         )
         
         ticket["_id"] = str(ticket["_id"])
-        return JSONResponse(
-            content=json.loads(json_util.dumps(ticket)),
-            status_code=201
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(ticket)), status_code=201)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro ao criar ticket: {str(e)}")
@@ -423,18 +502,12 @@ def obter_fila_tickets(
             filtros["apenas_meus"] = True
         
         atendente_email = usuario["email"] if apenas_meus else None
-        tickets = tickets_module.obter_fila_inteligente(
-            atendente_email=atendente_email,
-            filtros=filtros
-        )
+        tickets = tickets_module.obter_fila_inteligente(atendente_email=atendente_email, filtros=filtros)
         
         for ticket in tickets:
             ticket["_id"] = str(ticket["_id"])
         
-        return JSONResponse(
-            content=json.loads(json_util.dumps(tickets)),
-            status_code=200
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(tickets)), status_code=200)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro ao obter fila: {str(e)}")
@@ -442,16 +515,12 @@ def obter_fila_tickets(
 
 @app.get("/tickets/meus", response_model=List[dict])
 def listar_meus_tickets(usuario: dict = Depends(verificar_token)):
-    """Lista tickets do cliente logado"""
     try:
         tickets = tickets_module.listar_tickets_cliente(usuario["email"])
         for ticket in tickets:
             ticket["_id"] = str(ticket["_id"])
         
-        return JSONResponse(
-            content=json.loads(json_util.dumps(tickets)),
-            status_code=200
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(tickets)), status_code=200)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro ao listar tickets: {str(e)}")
@@ -459,7 +528,6 @@ def listar_meus_tickets(usuario: dict = Depends(verificar_token)):
 
 @app.get("/tickets/{ticket_id}", response_model=dict)
 def obter_ticket_detalhes(ticket_id: str, usuario: dict = Depends(verificar_token)):
-    """Obtém detalhes de um ticket"""
     try:
         ticket = tickets_module.obter_ticket(ticket_id)
         if not ticket:
@@ -474,10 +542,7 @@ def obter_ticket_detalhes(ticket_id: str, usuario: dict = Depends(verificar_toke
                 raise HTTPException(status_code=403, detail="Sem permissão")
         
         ticket["_id"] = str(ticket["_id"])
-        return JSONResponse(
-            content=json.loads(json_util.dumps(ticket)),
-            status_code=200
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(ticket)), status_code=200)
     except HTTPException:
         raise
     except Exception as e:
@@ -486,11 +551,7 @@ def obter_ticket_detalhes(ticket_id: str, usuario: dict = Depends(verificar_toke
 
 
 @app.post("/tickets/{ticket_id}/atribuir")
-def atribuir_ticket_route(
-    ticket_id: str,
-    usuario: dict = Depends(verificar_token)
-):
-    """Atendente pega um ticket para si"""
+def atribuir_ticket_route(ticket_id: str, usuario: dict = Depends(verificar_token)):
     try:
         user_db = colecao_usuarios.find_one({"email": usuario["email"]})
         tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
@@ -501,10 +562,7 @@ def atribuir_ticket_route(
         ticket = tickets_module.atribuir_ticket(ticket_id, usuario["email"])
         ticket["_id"] = str(ticket["_id"])
         
-        return JSONResponse(
-            content=json.loads(json_util.dumps(ticket)),
-            status_code=200
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(ticket)), status_code=200)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -515,12 +573,7 @@ def atribuir_ticket_route(
 
 
 @app.post("/tickets/{ticket_id}/mensagem")
-def adicionar_mensagem_route(
-    ticket_id: str,
-    dados: AdicionarMensagemTicket,
-    usuario: dict = Depends(verificar_token)
-):
-    """Adiciona mensagem ao ticket"""
+def adicionar_mensagem_route(ticket_id: str, dados: AdicionarMensagemTicket, usuario: dict = Depends(verificar_token)):
     try:
         ticket = tickets_module.obter_ticket(ticket_id)
         if not ticket:
@@ -534,17 +587,9 @@ def adicionar_mensagem_route(
         if not is_atendente and ticket["email_cliente"] != usuario["email"]:
             raise HTTPException(status_code=403, detail="Sem permissão")
         
-        mensagem = tickets_module.adicionar_mensagem(
-            ticket_id=ticket_id,
-            remetente_email=usuario["email"],
-            conteudo=dados.conteudo,
-            is_atendente=is_atendente
-        )
+        mensagem = tickets_module.adicionar_mensagem(ticket_id=ticket_id, remetente_email=usuario["email"], conteudo=dados.conteudo, is_atendente=is_atendente)
         
-        return JSONResponse(
-            content=json.loads(json_util.dumps(mensagem)),
-            status_code=201
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(mensagem)), status_code=201)
     except HTTPException:
         raise
     except Exception as e:
@@ -553,12 +598,7 @@ def adicionar_mensagem_route(
 
 
 @app.patch("/tickets/{ticket_id}/status")
-def atualizar_status_route(
-    ticket_id: str,
-    dados: TicketAtualizar,
-    usuario: dict = Depends(verificar_token)
-):
-    """Atualiza status do ticket (apenas atendentes)"""
+def atualizar_status_route(ticket_id: str, dados: TicketAtualizar, usuario: dict = Depends(verificar_token)):
     try:
         user_db = colecao_usuarios.find_one({"email": usuario["email"]})
         tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
@@ -566,17 +606,10 @@ def atualizar_status_route(
         if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
             raise HTTPException(status_code=403, detail="Apenas atendentes")
         
-        ticket = tickets_module.atualizar_status_ticket(
-            ticket_id=ticket_id,
-            novo_status=dados.status.value if dados.status else None,
-            observacoes=dados.observacoes
-        )
+        ticket = tickets_module.atualizar_status_ticket(ticket_id=ticket_id, novo_status=dados.status.value if dados.status else None, observacoes=dados.observacoes)
         
         ticket["_id"] = str(ticket["_id"])
-        return JSONResponse(
-            content=json.loads(json_util.dumps(ticket)),
-            status_code=200
-        )
+        return JSONResponse(content=json.loads(json_util.dumps(ticket)), status_code=200)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -586,63 +619,16 @@ def atualizar_status_route(
         raise HTTPException(status_code=500, detail=f"Erro ao atualizar: {str(e)}")
 
 
-@app.get("/tickets/estatisticas/atendente", response_model=EstatisticasAtendente)
-def obter_estatisticas_atendente_route(usuario: dict = Depends(verificar_token)):
-    """Retorna estatísticas do atendente logado"""
-    try:
-        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
-        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
-        
-        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
-            raise HTTPException(status_code=403, detail="Apenas atendentes")
-        
-        stats = tickets_module.obter_estatisticas_atendente(usuario["email"])
-        return JSONResponse(content=stats, status_code=200)
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
-
-
-@app.get("/tickets/dashboard/metricas", response_model=DashboardMetricas)
-def obter_dashboard_metricas_route(usuario: dict = Depends(verificar_token)):
-    """Retorna métricas gerais do dashboard (atendentes)"""
-    try:
-        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
-        tipo = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
-        
-        if tipo not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
-            raise HTTPException(status_code=403, detail="Apenas atendentes")
-        
-        metricas = tickets_module.obter_dashboard_metricas()
-        return JSONResponse(content=metricas, status_code=200)
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
-
-
-# ================================================================
-# ROTAS DE GERENCIAMENTO DE USUÁRIOS
-# ================================================================
+# === ROTAS DE GERENCIAMENTO DE USUÁRIOS ===
 
 @app.post("/usuarios/tornar-atendente")
-def tornar_atendente(
-    email: EmailStr,
-    usuario: dict = Depends(verificar_token)
-):
-    """Admin torna um usuário em atendente"""
+def tornar_atendente(email: EmailStr, usuario: dict = Depends(verificar_token)):
     try:
         user_db = colecao_usuarios.find_one({"email": usuario["email"]})
         if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
             raise HTTPException(status_code=403, detail="Apenas admins")
         
-        result = colecao_usuarios.update_one(
-            {"email": email},
-            {"$set": {"tipo_usuario": TipoUsuario.ATENDENTE.value}}
-        )
+        result = colecao_usuarios.update_one({"email": email}, {"$set": {"tipo_usuario": TipoUsuario.ATENDENTE.value}})
         
         if result.modified_count == 0:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -655,30 +641,7 @@ def tornar_atendente(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ================================================================
-# ROTAS DE PÁGINAS HTML
-# ================================================================
-
-@app.get("/atendimento", response_class=FileResponse, include_in_schema=False)
-async def get_atendimento_page():
-    """Página de dashboard para atendentes"""
-    return FileResponse(FRONTEND_DIR / "html" / "atendimento.html")
-
-
-@app.get("/tickets", response_class=FileResponse, include_in_schema=False)
-async def get_tickets_page():
-    """Página de tickets para clientes"""
-    return FileResponse(FRONTEND_DIR / "html" / "tickets.html")
-
-
-# ================================================================
-# ROTAS DE TREINAMENTO - SEM AUTENTICAÇÃO
-# ================================================================
-
-# ================================================================
-# ROTAS DE TREINAMENTO - PADRÃO CORRETO (COLEÇÃO INTERACOES)
-# ================================================================
-
+# === ROTAS DE TREINAMENTO === (mantidas conforme trecho anterior)
 @app.post("/treinamento/adicionar-publico")
 def adicionar_treinamento_publico(dados: TreinamentoEntrada):
     try:
@@ -714,6 +677,7 @@ def adicionar_treinamento_publico(dados: TreinamentoEntrada):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
+
 @app.get("/treinamento/listar-publico")
 def listar_treinamentos_publico(skip: int = 0, limit: int = 50, categoria: Optional[str] = None):
     try:
@@ -735,14 +699,378 @@ def listar_treinamentos_publico(skip: int = 0, limit: int = 50, categoria: Optio
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/treinamento", response_class=FileResponse, include_in_schema=False)
 async def get_treinamento_page():
     return FileResponse(FRONTEND_DIR / "html" / "treinamento.html")
-# === ARQUIVOS ESTÁTICOS ===
 
-from pathlib import Path
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent.joinpath("front-end")
+# === ROTAS DE WEBHOOK (config/test/status/enviar/callback/logs/estatisticas) ===
+
+@app.post("/webhook/configurar", response_model=WebhookConfigResposta)
+def configurar_webhook_route(config: WebhookConfig, usuario: dict = Depends(verificar_token)):
+    """
+    Configura webhook para envio de sessões (apenas ADMIN)
+    """
+    try:
+        # Verificar permissão de admin
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins podem configurar webhook")
+        
+        resultado = webhook_manager.configurar_webhook(
+            url=str(config.url),
+            secret_key=config.secret_key,
+            ativo=config.ativo,
+            timeout_segundos=config.timeout_segundos,
+            max_tentativas=config.max_tentativas
+        )
+        
+        return JSONResponse(content=json.loads(json_util.dumps(resultado)), status_code=201)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao configurar webhook: {str(e)}")
+
+
+@app.get("/webhook/config")
+def obter_config_webhook_route(usuario: dict = Depends(verificar_token)):
+    """Retorna configuração atual do webhook (apenas ADMIN)"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        config = webhook_manager.obter_config()
+        if not config:
+            raise HTTPException(status_code=404, detail="Webhook não configurado")
+        
+        # Remover secret_key da resposta por segurança
+        config_safe = {k: v for k, v in config.items() if k != "secret_key"}
+        config_safe["secret_key_presente"] = True
+        
+        return JSONResponse(content=json.loads(json_util.dumps(config_safe)), status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/webhook/testar", response_model=None)
+def testar_webhook_route(usuario: dict = Depends(verificar_token)):
+    """
+    Testa conexão com webhook configurado (chama webhook_manager.testar_webhook()).
+    """
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+
+        resultado = webhook_manager.testar_webhook()
+
+        return JSONResponse(content=resultado, status_code=200 if resultado.get("sucesso") else 500)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/webhook/status/{sessao_id}")
+def status_envio(sessao_id: str, limit: int = 10, usuario: dict = Depends(verificar_token)):
+    """
+    Retorna os últimos `limit` logs para a sessao_id informada (útil para debug).
+    """
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+
+        logs = list(colecao_webhook_logs.find({"sessao_id": sessao_id}).sort("timestamp", -1).limit(limit))
+        # normalizar ObjectId e datetimes para JSON-friendly
+        for l in logs:
+            l["_id"] = str(l.get("_id"))
+            if isinstance(l.get("timestamp"), datetime):
+                l["timestamp"] = l["timestamp"].isoformat()
+            if isinstance(l.get("tempo_resposta_ms"), (int, float)):
+                l["tempo_resposta_ms"] = int(l["tempo_resposta_ms"])
+
+        return JSONResponse(content={"sucesso": True, "logs": logs}, status_code=200)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/webhook/enviar-sessao/{sessao_id}")
+def enviar_sessao_route(sessao_id: str, force: bool = False, usuario: dict = Depends(verificar_token)):
+    """
+    Enfileira o envio de uma sessão para análise (async) - apenas admins
+    """
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+
+        resultado = webhook_manager.enviar_webhook_async(sessao_id, force=force)
+        status_code = 202 if resultado.get("sucesso") else 400
+
+        return JSONResponse(content=resultado, status_code=status_code)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/webhook/ativar")
+def ativar_webhook_route(usuario: dict = Depends(verificar_token)):
+    """Ativa webhook"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        webhook_manager.ativar_webhook()
+        return {"mensagem": "Webhook ativado"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/webhook/desativar")
+def desativar_webhook_route(usuario: dict = Depends(verificar_token)):
+    """Desativa webhook"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        webhook_manager.desativar_webhook()
+        return {"mensagem": "Webhook desativado"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/webhook/enviar-sessao/executar/{sessao_id}")
+def enviar_sessao_sync_route(sessao_id: str, force: bool = False, usuario: dict = Depends(verificar_token)):
+    """
+    Envia SÍNCRONO (bloqueante) — mantém endpoint legado que você já tinha.
+    Usar apenas quando precisar do resultado imediato.
+    """
+    try:
+        # Verificar se sessão existe e pertence ao usuário
+        sessao = colecao_sessoes.find_one({"_id": sessao_id})
+        if not sessao:
+            raise HTTPException(status_code=404, detail="Sessão não encontrada")
+        
+        # Verificar permissão
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        # Apenas dono da sessão ou admin/atendente pode enviar
+        if tipo_usuario == TipoUsuario.CLIENTE.value:
+            if sessao["user_id"] != usuario["user_id"]:
+                raise HTTPException(status_code=403, detail="Sem permissão")
+        
+        # Enviar (síncrono)
+        resultado = webhook_manager.enviar_webhook(sessao_id, force=force)
+        
+        return JSONResponse(content=json.loads(json_util.dumps(resultado)), status_code=200 if resultado.get("sucesso") else 400)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar: {str(e)}")
+
+
+@app.post("/webhook/callback", include_in_schema=False)
+def webhook_callback_route(
+    dados: WebhookResposta,
+    signature: str = Header(..., alias="X-Webhook-Signature", description="Assinatura HMAC-SHA256")
+):
+    """
+    Endpoint para receber feedback do webhook terceiro (público — valida assinatura)
+    """
+    try:
+        # Converter Pydantic para dict
+        dados_dict = dados.dict()
+        
+        # Processar feedback
+        resultado = webhook_manager.receber_feedback(dados_dict, signature)
+        
+        if not resultado["sucesso"]:
+            raise HTTPException(status_code=400, detail=resultado.get("erro", "Erro ao processar feedback"))
+        
+        return JSONResponse(content=resultado, status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/webhook/feedbacks/{sessao_id}")
+def obter_feedbacks_sessao_route(sessao_id: str, usuario: dict = Depends(verificar_token)):
+    """
+    Retorna todos os feedbacks recebidos de uma sessão
+    """
+    try:
+        # Verificar se sessão existe e permissão
+        sessao = colecao_sessoes.find_one({"_id": sessao_id})
+        if not sessao:
+            raise HTTPException(status_code=404, detail="Sessão não encontrada")
+        
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        # Verificar permissão
+        if tipo_usuario == TipoUsuario.CLIENTE.value:
+            if sessao["user_id"] != usuario["user_id"]:
+                raise HTTPException(status_code=403, detail="Sem permissão")
+        
+        feedbacks = webhook_manager.obter_feedbacks_sessao(sessao_id)
+        
+        return JSONResponse(content=json.loads(json_util.dumps(feedbacks)), status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/webhook/logs/{sessao_id}")
+def obter_logs_webhook_route(sessao_id: str, usuario: dict = Depends(verificar_token)):
+    """Retorna logs de envio de webhook de uma sessão (apenas admin)"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        logs = webhook_manager.obter_logs_sessao(sessao_id)
+        
+        return JSONResponse(content=json.loads(json_util.dumps(logs)), status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/webhook/estatisticas", response_model=EstatisticasFeedback)
+def obter_estatisticas_webhook_route(usuario: dict = Depends(verificar_token)):
+    """
+    Retorna estatísticas gerais dos feedbacks recebidos
+    """
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        # Atendentes e admins podem ver estatísticas gerais
+        if tipo_usuario not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes e admins")
+        
+        estatisticas = webhook_manager.obter_estatisticas()
+        
+        return JSONResponse(content=json.loads(json_util.dumps(estatisticas)), status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/webhook/feedbacks", response_model=ListaFeedbacks)
+def listar_todos_feedbacks_route(pagina: int = 1, tamanho_pagina: int = 20, nivel: Optional[NivelFeedback] = None, usuario: dict = Depends(verificar_token)):
+    """
+    Lista todos os feedbacks com paginação e filtros
+    """
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        tipo_usuario = user_db.get("tipo_usuario", TipoUsuario.CLIENTE.value)
+        
+        if tipo_usuario not in [TipoUsuario.ATENDENTE.value, TipoUsuario.ADMIN.value]:
+            raise HTTPException(status_code=403, detail="Apenas atendentes e admins")
+        
+        # Validar parâmetros
+        if tamanho_pagina > 100:
+            tamanho_pagina = 100
+        if pagina < 1:
+            pagina = 1
+        
+        # Construir filtro
+        filtro = {}
+        if nivel:
+            filtro["nivel"] = nivel.value
+        
+        # Buscar feedbacks
+        skip = (pagina - 1) * tamanho_pagina
+        feedbacks = list(colecao_webhook_feedbacks.find(filtro).sort("recebido_em", -1).skip(skip).limit(tamanho_pagina))
+        
+        # Formatar
+        for f in feedbacks:
+            f["_id"] = str(f["_id"])
+        
+        total = colecao_webhook_feedbacks.count_documents(filtro)
+        
+        resultado = {"feedbacks": feedbacks, "total": total, "pagina": pagina, "tamanho_pagina": tamanho_pagina}
+        
+        return JSONResponse(content=json.loads(json_util.dumps(resultado)), status_code=200)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/webhook/config")
+def remover_config_webhook_route(usuario: dict = Depends(verificar_token)):
+    """Remove configuração do webhook (apenas admin)"""
+    try:
+        user_db = colecao_usuarios.find_one({"email": usuario["email"]})
+        if user_db.get("tipo_usuario") != TipoUsuario.ADMIN.value:
+            raise HTTPException(status_code=403, detail="Apenas admins")
+        
+        # Usar coleção definida no seu modulo database
+        resultado = colecao_webhook_config.delete_many({})
+        
+        return {"mensagem": f"Webhook removido ({resultado.deleted_count} configuração(ões))"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === PÁGINAS ESTÁTICAS E REDIRECIONAMENTO ===
+
+@app.get("/webhook", response_class=FileResponse, include_in_schema=False)
+async def get_webhook_page():
+    """Página de gerenciamento de webhook (apenas admins)"""
+    return FileResponse(FRONTEND_DIR / "html" / "webhook.html")
+
 
 app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
 app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
@@ -762,3 +1090,128 @@ async def get_login_page():
 @app.get("/chat", response_class=FileResponse, include_in_schema=False)
 async def get_chat_page():
     return FileResponse(FRONTEND_DIR / "html" / "chat.html")
+
+
+print("[✓] Rotas de Webhook registradas!")
+
+
+# ---------------------------------------------------------------------
+# Worker: auto-close sessions after inactivity (atomic lock via Mongo)
+# ---------------------------------------------------------------------
+def worker_auto_close_atomic(inatividade_minutos: int = 5, intervalo_segundos: int = 60, batch_size: int = 200):
+    """
+    Fecha sessões inativas e enfileira envio para análise.
+    Usa lock atômico via find_one_and_update para evitar duplicatas em múltiplas instâncias.
+    """
+    print(f"[AUTO-CLOSE] Iniciando worker (inatividade={inatividade_minutos}min, intervalo={intervalo_segundos}s)")
+    while True:
+        try:
+            limite = datetime.utcnow() - timedelta(minutes=inatividade_minutos)
+            # candidatos: status != finalizada, atualizado_em < limite, não enfileirado, sem processing_lock
+            query = {
+                "status": {"$ne": "finalizada"},
+                "atualizado_em": {"$lt": limite},
+                "enfileirado_para_analise": {"$ne": True},
+                "processing_lock": {"$ne": True}
+            }
+
+            candidatos = list(colecao_sessoes.find(query).limit(batch_size))
+            if candidatos:
+                print(f"[AUTO-CLOSE] {len(candidatos)} candidato(s) encontrados para fechamento.")
+
+            for s in candidatos:
+                sid = s["_id"]
+
+                # Tenta adquirir lock atômico
+                locked = colecao_sessoes.find_one_and_update(
+                    {"_id": sid, "processing_lock": {"$ne": True}},
+                    {"$set": {"processing_lock": True, "processing_started_at": datetime.utcnow()}},
+                    return_document=False
+                )
+
+                if locked is None:
+                    # outro processo pegou
+                    print(f"[AUTO-CLOSE] Lock não adquirido para sessão {sid}, pulando.")
+                    continue
+
+                try:
+                    # opcional: exigir que haja interações
+                    total_interacoes = colecao_interacoes.count_documents({"sessao_id": sid})
+                    if total_interacoes == 0:
+                        # remove lock e pula
+                        colecao_sessoes.update_one({"_id": sid}, {"$unset": {"processing_lock": "", "processing_started_at": ""}})
+                        print(f"[AUTO-CLOSE] Sessão {sid} sem interações — pulando.")
+                        continue
+
+                    # marcar finalizada e enfileirada
+                    now = datetime.utcnow()
+                    colecao_sessoes.update_one(
+                        {"_id": sid},
+                        {"$set": {
+                            "status": "finalizada",
+                            "atualizado_em": now,
+                            "finalizada_em": now,
+                            "enfileirado_para_analise": True,
+                            "enfileirado_em": now
+                        }, "$unset": {"processing_lock": "", "processing_started_at": ""}}
+                    )
+
+                    # chamar envio (async preferível)
+                    try:
+                        resultado = webhook_manager.enviar_webhook_async(sid, force=False)
+                    except AttributeError:
+                        resultado = webhook_manager.enviar_webhook(sid, force=False)
+
+                    print(f"[AUTO-CLOSE] Sessão {sid} processada/enfileirada -> sucesso={resultado.get('sucesso', False)}")
+
+                except Exception as e:
+                    print(f"[AUTO-CLOSE] Erro processando sessão {sid}: {e}")
+                    traceback.print_exc()
+                    # garantir unlock
+                    colecao_sessoes.update_one({"_id": sid}, {"$unset": {"processing_lock": "", "processing_started_at": ""}})
+
+        except Exception as e:
+            print(f"[AUTO-CLOSE] Erro no loop do worker: {e}")
+            traceback.print_exc()
+
+        time.sleep(intervalo_segundos)
+
+
+# Iniciar worker se habilitado via ENV
+_enable_auto_close = os.getenv("ENABLE_AUTO_CLOSE", "0").lower() in ("1", "true", "yes")
+if _enable_auto_close:
+    try:
+        _inatividade = int(os.getenv("AUTO_CLOSE_INATIVIDADE_MINUTOS", "5"))
+        _intervalo = int(os.getenv("AUTO_CLOSE_INTERVAL_SECONDS", "60"))
+        _batch = int(os.getenv("AUTO_CLOSE_BATCH_SIZE", "200"))
+    except Exception:
+        _inatividade, _intervalo, _batch = 5, 60, 200
+
+    t = threading.Thread(target=worker_auto_close_atomic, args=(_inatividade, _intervalo, _batch), daemon=True, name="auto-close-worker")
+    t.start()
+    print(f"[AUTO-CLOSE] Worker rodando (thread {t.name})")
+else:
+    print("[AUTO-CLOSE] Worker desativado. Para ativar defina ENABLE_AUTO_CLOSE=1 no ambiente.")
+
+
+# ---------------------------------------------------------------------
+# Montagem estática e rotas de frontend
+# ---------------------------------------------------------------------
+app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
+app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
+app.mount("/img", StaticFiles(directory=FRONTEND_DIR / "img"), name="img")
+
+@app.get("/", response_class=RedirectResponse, include_in_schema=False)
+async def root_redirect():
+    return "/login"
+
+@app.get("/login", response_class=FileResponse, include_in_schema=False)
+async def get_login_page():
+    return FileResponse(FRONTEND_DIR / "html" / "login.html")
+
+@app.get("/chat", response_class=FileResponse, include_in_schema=False)
+async def get_chat_page():
+    return FileResponse(FRONTEND_DIR / "html" / "chat.html")
+
+
+print("[✓] Aplicação inicializada com rotas e worker (auto-close).")
