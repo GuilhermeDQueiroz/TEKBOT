@@ -213,12 +213,13 @@ class ValidadorTopicosProibidos:
         
         # 7. Verificação de palavras-chave diretas
         for palavra in self.palavras_proibidas:
-            if palavra in pergunta_lower:
+            padrao = r'\b' + re.escape(palavra) + r'\b'
+            if re.search(padrao, pergunta_lower):
                 return {
                     'permitido': False,
                     'motivo': f'Termo proibido: {palavra.upper()}',
                     'categoria_bloqueio': 'palavra_chave'
-                }
+            }
         
         # Pergunta permitida
         return {
